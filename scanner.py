@@ -6,10 +6,12 @@ import plotly.graph_objects as go
 # MAXZ = 158
 # MINX = -31
 # MAXX = 31
-MINZ = 0
-MAXZ = 2.1
+# DELTA = 12
+MINZ = -2.1
+MAXZ = 0.1
 MINX = 0
-MAXX = 6.3
+MAXX = 3.1
+DELTA = 0.2
 
 ETHERNETSCANNER_TCPSCANNERDISCONNECTED = 0
 ETHERNETSCANNER_TCPSCANNERCONNECTED = 3
@@ -19,7 +21,21 @@ ETHERNETSCANNER_BUFFERSIZEMAX = 2050 * 2050
 ETHERNETSCANNER_ERROR = 1
 ETHERNETSCANNER_GETINFOSIZEMAX = 128 * 1024
 pointer, status = None, None
-lib = CDLL(r"C:\Users\ukrse\PROJECTS\SensorDriver2\EthernetScanner\EthernetScanner.dll")
+lib = CDLL(r"C:\Users\Admin\PycharmProjects\SensorDriver2\EthernetScanner\EthernetScanner.dll")
+
+def writeToSensor(pointer, lib, Command):
+    EthernetScanner_WriteData = lib.EthernetScanner_WriteData
+    EthernetScanner_WriteData.argtypes = [c_void_p, c_char_p]
+    cmd = Command.encode()
+    command = c_char_p(cmd)
+    cmdlen = len(Command)
+    dataLength = EthernetScanner_WriteData(pointer, command, cmdlen)
+    if dataLength != cmdlen:
+        print("Could not send command "+Command)
+        return 0
+    else:
+        return 1
+
 
 def connect(lib):
     print('Try to connect ...')
@@ -63,6 +79,18 @@ def disconnect(lib, pointer):
     if EthernetScanner_Disconnect(pointer) == None: print('Connection closed!')
     else:
         print('Closing connection error!')
+
+
+def getDllFiFoState(lib, pointer):
+    EthernetScanner_GetDllFiFoState = lib.EthernetScanner_GetDllFiFoState
+    EthernetScanner_GetDllFiFoState.argtypes = [c_void_p]
+    return EthernetScanner_GetDllFiFoState(pointer)
+
+
+def resetDllFiFo(lib, pointer):
+    EthernetScanner_ResetDllFiFo = lib.EthernetScanner_ResetDllFiFo
+    EthernetScanner_ResetDllFiFo.argtypes = [c_void_p]
+    return EthernetScanner_ResetDllFiFo(pointer)
 
 
 def getInfo(lib, pointer):
@@ -143,16 +171,18 @@ def transformData(bufX, bufZ, bufIntensity):
     # arrI = I[np.logical_and(X != 0, Z != 0, I != 0)]
     arrI = I[(X != 0) & (Z != 0) & (I != 0)]
     # print(f'len I: {len(arrI)}, I: {arrI[0:10]}')
-    arr = np.array([arrX, arrZ, arrI])
-    # print(arr.shape)
-    # saveToFile(np.hstack([arrX, arrZ, arrI]).reshape(-1))
-    if arrX.size:
-        mask = (arrX>=-20).any() and (arrX<=20).any()
-        minZ = arrZ[mask].min()
-    else:
-        minZ = 0
-    # print(minZ)
-    return arr, minZ
+
+    # arr = np.array([arrX, arrZ, arrI])
+    # if arrX.size:
+    #     mask = (arrX>=-20).any() and (arrX<=20).any()
+    #     minZ = arrZ[mask].min()
+    # else:
+    #     minZ = 0
+
+    # arr1 = np.array(arrX)
+    # arr2 = np.array(arrZ)
+
+    return arrX, arrZ #arr, minZ
 
 
 def makeFig(arr):

@@ -6,22 +6,22 @@ import plotly.graph_objects as go
 import datetime as dt
 import os
 import scanner
+# from scanner import connect, getInfo, getXZIExtended, makeFig
 
+pointer, status = None, None
 PATH = os.getcwd()
 DICTSUBFOLDERS = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_dir()]
 DICTSUBFOLDERS.append(dict({'label': 'local paths are only available', 'value': 'local', 'disabled': True}))
 # print(DICTSUBFOLDERS)
 #INTERVAL in msec 33.33ms/30FPS 16.66ms/60FPS
-# INTERVAL = 16.66
+# INTERVAL = 17
 INTERVAL = 33
-# INTERVAL = 60
+# INTERVAL = 50
 POINTS = 1280
 #POINTS = 2560
 START, STOP, RUNTIME, PROGTIME, INT = dt.datetime.now().timestamp()+1, 0, 0, 0, -1
-fig = go.Figure(data=go.Scatter(x=[], y=[],
-                                                       mode='markers',
-                                                       marker=dict(size=1, color='green', showscale=False))
-                                       )
+# fig = go.Figure(data=go.Scatter(x=[], y=[], mode='markers', marker=dict(size=1, color='green', showscale=False)))
+
 dash.register_page(__name__, path='/')
 
 layout = html.Div([
@@ -45,7 +45,7 @@ layout = html.Div([
                                 dbc.InputGroupText("Port"),
                                 dbc.Input(id="port", value="32001", placeholder="32001", type="number"),
                                 dbc.InputGroupText("Frequency"),
-                                dbc.Input(id="frequency", value="30", placeholder="30", type="number"),
+                                dbc.Input(id="frequency", value=INTERVAL, placeholder="30", type="number"),
                             ], size="sm"),
                             html.Br(),
                             dbc.ButtonGroup([
@@ -117,14 +117,30 @@ layout = html.Div([
             dbc.Card([
                 dbc.CardHeader("Realtime scanning graph"),
                 dbc.CardBody([
-                    # html.H4('Realtime scanning graph'),
-                    dcc.Graph(id='plot',
-                              figure=fig
-                              # figure=go.Figure(data=go.Scatter(x=[], y=[],
-                              #                                  mode='markers',
-                              #                                  marker=dict(size=1, color='green', showscale=False))
-                              #                  )
-                              ),
+                    dbc.Row([
+                        dbc.Col([
+                            dcc.Graph(id='plotROI',
+                                      figure=go.Figure(data=go.Scatter(x=[scanner.MINX+scanner.DELTA, scanner.MAXX-scanner.DELTA, scanner.MAXX, scanner.MINX, scanner.MINX+scanner.DELTA],
+                                                                       y=[scanner.MINZ, scanner.MINZ, scanner.MAXZ, scanner.MAXZ, scanner.MINZ],
+                                                                       mode='lines',
+                                                                       line=dict(color='red'))
+                                                       )
+                                      ),
+                        ],
+                        width=4),
+                        dbc.Col([
+                            dcc.Graph(id='plot',
+                                      figure=go.Figure()
+                                      # figure=fig
+
+                                      # figure=go.Figure(data=go.Scatter(x=[], y=[],
+                                      #                                  mode='markers',
+                                      #                                  marker=dict(size=1, color='green', showscale=False))
+                                      #                  )
+                                      ),
+                        ],
+                        width=8),
+                    ]),
                     html.H5('Log info:'),
                     html.Output(id='logInformation'),
                     html.Br(),
@@ -134,6 +150,7 @@ layout = html.Div([
         width=8),
     ]),
     dcc.Interval('interval', interval=INTERVAL, n_intervals=0, max_intervals=0),
+    dcc.Store(id='connectionStatus', data=0),
     dcc.Store(id='ROI'),
     dcc.Store(id='baselineStore')
 ])
@@ -165,15 +182,17 @@ def saveFrame(n_clicks, value, fig):
     # print(fig.get('data')[0]['x'])
     # print(fig.get('data')[0]['y'])
     # define NumPy array
-    data = np.array([fig.get('data')[0]['x'], fig.get('data')[0]['y']])
+    data = np.array([np.around(fig.get('data')[0]['x'], 4), np.around(fig.get('data')[0]['y'], 4)])
+    # print(data)
     # export array to CSV file
-    np.savetxt(f'{value}\\{currentTime}.csv', data, delimiter=",")
+    np.savetxt(f'{value}\\{currentTime}.csv', data, fmt="%1.2f", delimiter=",")
     return f'saved to {value}{currentTime}.csv'
 
 
 #update frequency
 @callback(
     Output('logInformation', 'children', allow_duplicate=True),
+    Output('interval', 'interval'),
     Input('updateFrequency', 'n_clicks'),
     State('frequency', 'value'),
     prevent_initial_call=True
@@ -181,20 +200,53 @@ def saveFrame(n_clicks, value, fig):
 def updateFrequency(n_clicks, value):
     global INTERVAL
     INTERVAL = int(1000/value)
-    print(f'update frequency: {INTERVAL}')
-    return f'update frequency: {INTERVAL}'
+    print(f'update frequency in ms: {INTERVAL}')
+    return f'update frequency in ms: {INTERVAL}', INTERVAL
+
+
+#connection
+@callback(
+    Output('logInformation', 'children', allow_duplicate=True),
+    Output('connectionStatus', 'data'),
+    Output('status', 'value'),
+    Input('connect', 'n_clicks'),
+    State('connectionStatus', 'data'),
+    prevent_initial_call=True
+)
+def connection(n_clicks, data):
+    strStatus = "OFF"
+    global pointer, status
+    if not status:
+        pointer, status = scanner.connect(scanner.lib)
+        scanner.writeToSensor(pointer, scanner.lib, "SetAcquisitionStop\r")
+        res = scanner.resetDllFiFo(scanner.lib, pointer)
+        count = 0
+        while True:
+            dataLength, bufX, bufZ, bufIntensity = scanner.getXZIExtended(scanner.lib, pointer)
+            if dataLength == -1:
+                print(f'Buffer is cleaned {dataLength}({count}) first time')
+                break
+            count += 1
+        scanner.writeToSensor(pointer, scanner.lib, "SetAcquisitionStart\r")
+        if status: strStatus = "ON"
+    else: strStatus = "ON"
+
+    return f"connection status: {status}", status, strStatus
+
 
 #update intervals with ROI
 @callback(
     Output('plot', 'figure', allow_duplicate=True),
-    Output('logInformation', 'children'),
+    Output('logInformation', 'children', allow_duplicate=True),
     Input('interval', 'n_intervals'),
     Input('ROI', 'data'),
     Input('baselineStore', 'data'),
+    State('connectionStatus', 'data'),
     prevent_initial_call=True,
 )
-def update_intervals(n_intervals, data, baseline):
+def update_intervals(n_intervals, data, baseline, s):
     global START, STOP, RUNTIME, PROGTIME, INT
+    global fig
     INT += 1
     if not (RUNTIME):
         msg = f'({POINTS} points): count {INT} (progtime in sec: {INTERVAL * INT / 1000} and realtime: {int(dt.datetime.now().timestamp() - START)})'
@@ -207,20 +259,56 @@ def update_intervals(n_intervals, data, baseline):
         maxZ = data['yaxis.range[1]']
     else:
         minX, maxX, minZ, maxZ = scanner.MINX, scanner.MAXX, scanner.MINZ, scanner.MAXZ
-    arr1, arr2, max = generateData(n_intervals)
-    # fig = go.Figure()
+    arr1, arr2, min = generateData(n_intervals, s)
+    fig = go.Figure()
     fig = go.Figure(data=go.Scattergl(x=arr1, y=arr2,
                                       mode='markers',
                                       marker=dict(size=1, color='green', showscale=False)
                                       ))
     fig.add_trace(go.Scattergl(x=[minX, maxX], y=[baseline, baseline], mode='lines', line_dash='dash', name='baseline'))
-    fig.add_trace(go.Scattergl(x=[max[0]], y=[max[1]], mode="markers+text", text=[round(max[1], 2)], textposition="bottom center"))
-    fig.update_xaxes(range=[minX, maxX], dtick=0.2, tickangle=90, zeroline=False)
-    fig.update_yaxes(range=[minZ, maxZ], dtick=0.2, zeroline=False)
+    fig.add_trace(go.Scattergl(x=[min[0]], y=[min[1]], mode="markers+text", text=[round(min[1], 2)], textposition="bottom center"))
+    fig.update_xaxes(range=[minX, maxX], tickangle=90, zeroline=False)#dtick=0.2,
+    fig.update_yaxes(range=[minZ, maxZ], zeroline=False)#dtick=0.2,
     fig.update_layout({'xaxis': {'scaleanchor': 'y'}}, showlegend=False)
-    # fig.update_layout(xaxis={'scaleanchor': 'y'}, grid_ygap=0.1, grid_xgap=0.1)
 
-    return fig, msg
+    # fig.add_trace(go.Scattergl(x=[max[0]], y=[max[1]], mode="markers", marker=dict(size=1, color='green', showscale=False)))
+
+    # with open('data.txt', 'a') as f:
+    #     f.write(f'{min[0]}, {min[1]};\n')
+    return fig, f'{min[0]}, {min[1]}'
+
+
+def generateData(step, flag):
+    global pointer
+    if not flag:
+        x0 = 0
+        x1 = np.pi
+        arr1 = np.linspace(x0, x1, POINTS)
+        s = 2*np.pi/POINTS
+        arr2 = arr1*0
+        arr2 = -1*abs(np.sin((arr1 + 10*s*step)*0.5) + np.cos((arr1 + 10*s*step)*2))
+    else:
+        if scanner.resetDllFiFo(scanner.lib, pointer): print("Reset DLL FiFo UNsuccessful!")
+        # print(f'Reset DLL FiFo result: {scanner.resetDllFiFo(scanner.lib, pointer)}')
+        # count = 0
+        # while True:
+        #     dataLength, bufX, bufZ, bufIntensity = scanner.getXZIExtended(scanner.lib, pointer)
+        #     if dataLength == -1:
+        #         print(f'Buffer is cleaned {dataLength}({count})')
+        #         break
+        #     count += 1
+        dataLength, arrX, arrZ, bufIntensity = scanner.getXZIExtended(scanner.lib, pointer)
+        arr1, arr2 = scanner.transformData(arrX, arrZ, bufIntensity)
+    # print(f'len {len(arr1), len(arr2)}')
+    # min = []
+    if len(arr2):
+        minIndex = np.argmin(arr2)
+        min = [arr1[minIndex], arr2[minIndex]]
+    else:
+        min = [0, 0]
+    # print(max)
+
+    return arr1, arr2, min
 
 
 #zoom by plot
@@ -264,7 +352,9 @@ def updateByROI(n_clicks, minX, maxX, minZ, maxZ):
     data['xaxis.range[1]'] = maxX
     data['yaxis.range[0]'] = minZ
     data['yaxis.range[1]'] = maxZ
-
+    command = f'SetROI1_mm={round(minX, 0)},{round(minZ, 0)},{round(maxX, 0)},{round(maxZ, 0)}\r'
+    print(f'command: {command}')
+    scanner.writeToSensor(pointer, scanner.lib, command)
     return 'ROI zoomed', data
 
 
@@ -280,89 +370,6 @@ def fixBaseline(n_clicks, value):
     return value
 
 
-#data generation
-@callback(
-    Output('plot', 'figure'),
-    Input('generation', 'n_clicks'),
-    prevent_initial_call=True,
-)
-def updateData(n_clicks):
-    global fig
-    optimizationType = 'opengl'
-    arr1, arr2, max = generateData(0)
-    if optimizationType == 'standard':
-        fig = go.Figure(data=go.Scatter(x=arr1, y=arr2,
-                                        mode='markers',
-                                        marker=dict(size=1, color='green', showscale=False)
-                                        ))
-    elif optimizationType == 'opengl':
-        fig = go.Figure(data=go.Scattergl(x=arr1, y=arr2,
-                                        mode='markers',
-                                        marker=dict(size=1, color='green', showscale=False)
-                                        ))
-    return fig
-
-
-#next step
-@callback(
-    Output('plot', 'figure', allow_duplicate=True),
-    Input('next', 'n_clicks'),
-    prevent_initial_call=True,
-)
-def updateNextData(n_clicks):
-    arr1, arr2, max = generateData(n_clicks)
-    fig = go.Figure(data=go.Scatter(x=arr1, y=arr2,
-                                    mode='markers',
-                                    marker=dict(size=1, color='green', showscale=False)
-                                    ))
-    return fig
-
-def generateData(step):
-    x0 = 0
-    x1 = 2*np.pi
-    arr1 = np.linspace(x0, x1, POINTS)
-    s = 2*np.pi/POINTS
-    arr2 = np.sin((arr1 + 10*s*step)*0.5) + np.cos((arr1 + 10*s*step)*2)
-    maxIndex = np.argmax(arr2)
-    max = [arr1[maxIndex], arr2[maxIndex]]
-
-    # print(s*step, arr1, arr2)
-    return arr1, arr2, max
-
-
-"""
-#timer
-@callback(
-    Output('countInfo', 'children', allow_duplicate=True),
-    Output('plot', 'figure', allow_duplicate=True),
-    Input('interval', 'n_intervals'),
-    Input('optimizationType', 'value'),
-    Input('patched', 'value'),
-    prevent_initial_call=True,
-)
-def update_intervals(n_intervals, typeValue, patchedValue):
-    global INT
-    INT += 1
-    arr1, arr2 = generateData(n_intervals)
-    if typeValue == 'standard':
-        fig = go.Figure(data=go.Scatter(x=arr1, y=arr2,
-                                        mode='markers',
-                                        marker=dict(size=1, color='green', showscale=False)
-                                        ))
-    elif typeValue == 'opengl':
-        if patchedValue == ['patched figure']:
-            fig = Patch()
-            fig["data"][0]["x"] = arr1
-            fig["data"][0]["y"] = arr2
-        else:
-            fig = go.Figure(data=go.Scattergl(x=arr1, y=arr2,
-                                            mode='markers',
-                                            marker=dict(size=1, color='green', showscale=False)
-                                            ))
-    return n_intervals, fig
-"""
-
-
 #start
 @callback(
     Output('interval', 'n_intervals'),
@@ -376,7 +383,7 @@ def start(n_clicks, n_intervals):
     STOP = 0
     RUNTIME, PROGTIME, INT = 0, 0, 0
     START = dt.datetime.now().timestamp()
-    return n_intervals, 36000000
+    return n_intervals, 36000000#303
 
 
 #pause
@@ -431,3 +438,41 @@ def logInfo(n_intervals, typeValue, patchedValue):
     #return f'with {value} method ({POINTS} points):{n_intervals} (progtime in sec: {INTERVAL*n_intervals/1000} and realtime: {int(RUNTIME)})'
     #return f'with {value} method ({POINTS} points):{n_intervals} (progtime in sec: {PROGTIME} and realtime: {int(RUNTIME)})'
 """
+
+
+#data generation
+@callback(
+    Output('plot', 'figure'),
+    Input('generation', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def updateData(n_clicks):
+    global fig
+    optimizationType = 'opengl'
+    arr1, arr2, max = generateData(0, 0)
+    if optimizationType == 'standard':
+        fig = go.Figure(data=go.Scatter(x=arr1, y=arr2,
+                                        mode='markers',
+                                        marker=dict(size=1, color='green', showscale=False)
+                                        ))
+    elif optimizationType == 'opengl':
+        fig = go.Figure(data=go.Scattergl(x=arr1, y=arr2,
+                                        mode='markers',
+                                        marker=dict(size=1, color='green', showscale=False)
+                                        ))
+    return fig
+
+
+#next step
+@callback(
+    Output('plot', 'figure', allow_duplicate=True),
+    Input('next', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def updateNextData(n_clicks):
+    arr1, arr2, max = generateData(n_clicks, 0)
+    fig = go.Figure(data=go.Scatter(x=arr1, y=arr2,
+                                    mode='markers',
+                                    marker=dict(size=1, color='green', showscale=False)
+                                    ))
+    return fig
