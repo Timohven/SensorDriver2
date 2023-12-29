@@ -2,16 +2,16 @@ from ctypes import *
 import numpy as np
 import plotly.graph_objects as go
 
-# MINZ = 74
-# MAXZ = 158
-# MINX = -31
-# MAXX = 31
-# DELTA = 12
-MINZ = -2.1
-MAXZ = 0.1
-MINX = 0
-MAXX = 3.1
-DELTA = 0.2
+MINZ = 74
+MAXZ = 158
+MINX = -31
+MAXX = 31
+DELTA = 12
+# MINZ = -2.1
+# MAXZ = 0.1
+# MINX = 0
+# MAXX = 3.1
+# DELTA = 0.2
 
 ETHERNETSCANNER_TCPSCANNERDISCONNECTED = 0
 ETHERNETSCANNER_TCPSCANNERCONNECTED = 3
@@ -21,7 +21,7 @@ ETHERNETSCANNER_BUFFERSIZEMAX = 2050 * 2050
 ETHERNETSCANNER_ERROR = 1
 ETHERNETSCANNER_GETINFOSIZEMAX = 128 * 1024
 pointer, status = None, None
-lib = CDLL(r"C:\Users\Admin\PycharmProjects\SensorDriver2\EthernetScanner\EthernetScanner.dll")
+lib = CDLL(r".\EthernetScanner\EthernetScanner.dll")
 
 def writeToSensor(pointer, lib, Command):
     EthernetScanner_WriteData = lib.EthernetScanner_WriteData

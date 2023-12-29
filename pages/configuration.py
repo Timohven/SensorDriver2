@@ -21,6 +21,39 @@ POINTS = 1280
 #POINTS = 2560
 START, STOP, RUNTIME, PROGTIME, INT = dt.datetime.now().timestamp()+1, 0, 0, 0, -1
 # fig = go.Figure(data=go.Scatter(x=[], y=[], mode='markers', marker=dict(size=1, color='green', showscale=False)))
+# figROI=go.Figure(data=go.Scatter(x=[scanner.MINX+scanner.DELTA,
+#                                     scanner.MAXX-scanner.DELTA,
+#                                     scanner.MAXX, scanner.MINX,
+#                                     scanner.MINX+scanner.DELTA],
+#                                  y=[scanner.MINZ,
+#                                     scanner.MINZ,
+#                                     scanner.MAXZ,
+#                                     scanner.MAXZ,
+#                                     scanner.MINZ],
+#                                  mode='lines',
+#                                  line=dict(color='red'),
+#                                  ),
+#                  )
+traces = []
+trace1 = go.Scatter(x=[scanner.MINX+scanner.DELTA, scanner.MAXX-scanner.DELTA, scanner.MAXX, scanner.MINX, scanner.MINX+scanner.DELTA],
+                    y=[scanner.MINZ, scanner.MINZ, scanner.MAXZ, scanner.MAXZ, scanner.MINZ],
+                    name='scanning area',
+                    mode='lines',
+                    line=dict(color='red', width=2)
+                    )
+trace2 = go.Scatter(x=[scanner.MINX, scanner.MAXX, scanner.MAXX, scanner.MINX, scanner.MINX],
+                    y=[scanner.MINZ, scanner.MINZ, scanner.MAXZ, scanner.MAXZ, scanner.MINZ],
+                    name='ROI',
+                    mode='lines',
+                    line=dict(color='green', width=1)
+                    )
+traces.append(trace1)
+traces.append(trace2)
+figROI=go.Figure()
+figROI.add_trace(traces[0])
+figROI.add_trace(traces[1])
+figROI.update_xaxes(fixedrange=True)
+figROI.update_yaxes(fixedrange=True)#, autorange='reversed')
 
 dash.register_page(__name__, path='/')
 
@@ -76,7 +109,10 @@ layout = html.Div([
                                     dbc.InputGroupText("ROI max Z"),
                                     dbc.Input(id="maxZ", value=scanner.MAXZ, type="number")
                                 ], size="sm"),
-                                dbc.Button("Aplay ROI", id="aplayROI", outline=True, color="primary", size="sm")
+                                dbc.ButtonGroup([
+                                    dbc.Button("Aplay ROI", id="aplayROI", outline=True, color="primary", size="sm"),
+                                    dbc.Button("Reset ROI", id="resetROI", outline=True, color="primary", size="sm")
+                                ], size="sm")
                             ]),
                         ])
                     ]),
@@ -120,17 +156,20 @@ layout = html.Div([
                     dbc.Row([
                         dbc.Col([
                             dcc.Graph(id='plotROI',
-                                      figure=go.Figure(data=go.Scatter(x=[scanner.MINX+scanner.DELTA, scanner.MAXX-scanner.DELTA, scanner.MAXX, scanner.MINX, scanner.MINX+scanner.DELTA],
-                                                                       y=[scanner.MINZ, scanner.MINZ, scanner.MAXZ, scanner.MAXZ, scanner.MINZ],
-                                                                       mode='lines',
-                                                                       line=dict(color='red'))
-                                                       )
+                                      figure=figROI,
+                                      config={"displayModeBar": False}
+                                      # figure=go.Figure(data=go.Scatter(x=[scanner.MINX+scanner.DELTA, scanner.MAXX-scanner.DELTA, scanner.MAXX, scanner.MINX, scanner.MINX+scanner.DELTA],
+                                      #                                  y=[scanner.MINZ, scanner.MINZ, scanner.MAXZ, scanner.MAXZ, scanner.MINZ],
+                                      #                                  mode='lines',
+                                      #                                  line=dict(color='red'))
+                                      #                  )
                                       ),
                         ],
                         width=4),
                         dbc.Col([
                             dcc.Graph(id='plot',
-                                      figure=go.Figure()
+                                      figure=go.Figure(),
+                                      config={"displayModeBar": False}
                                       # figure=fig
 
                                       # figure=go.Figure(data=go.Scatter(x=[], y=[],
@@ -242,11 +281,12 @@ def connection(n_clicks, data):
     Input('ROI', 'data'),
     Input('baselineStore', 'data'),
     State('connectionStatus', 'data'),
+    # State('plot', 'figure'),
     prevent_initial_call=True,
 )
 def update_intervals(n_intervals, data, baseline, s):
     global START, STOP, RUNTIME, PROGTIME, INT
-    global fig
+    # global fig
     INT += 1
     if not (RUNTIME):
         msg = f'({POINTS} points): count {INT} (progtime in sec: {INTERVAL * INT / 1000} and realtime: {int(dt.datetime.now().timestamp() - START)})'
@@ -260,7 +300,7 @@ def update_intervals(n_intervals, data, baseline, s):
     else:
         minX, maxX, minZ, maxZ = scanner.MINX, scanner.MAXX, scanner.MINZ, scanner.MAXZ
     arr1, arr2, min = generateData(n_intervals, s)
-    fig = go.Figure()
+    # fig = go.Figure()
     fig = go.Figure(data=go.Scattergl(x=arr1, y=arr2,
                                       mode='markers',
                                       marker=dict(size=1, color='green', showscale=False)
@@ -268,14 +308,14 @@ def update_intervals(n_intervals, data, baseline, s):
     fig.add_trace(go.Scattergl(x=[minX, maxX], y=[baseline, baseline], mode='lines', line_dash='dash', name='baseline'))
     fig.add_trace(go.Scattergl(x=[min[0]], y=[min[1]], mode="markers+text", text=[round(min[1], 2)], textposition="bottom center"))
     fig.update_xaxes(range=[minX, maxX], tickangle=90, zeroline=False)#dtick=0.2,
-    fig.update_yaxes(range=[minZ, maxZ], zeroline=False)#dtick=0.2,
+    fig.update_yaxes(range=[minZ, maxZ], zeroline=False)#, autorange='reversed')#dtick=0.2,
     fig.update_layout({'xaxis': {'scaleanchor': 'y'}}, showlegend=False)
 
     # fig.add_trace(go.Scattergl(x=[max[0]], y=[max[1]], mode="markers", marker=dict(size=1, color='green', showscale=False)))
 
     # with open('data.txt', 'a') as f:
     #     f.write(f'{min[0]}, {min[1]};\n')
-    return fig, f'{min[0]}, {min[1]}'
+    return fig, f'{round(min[0], 2)}, {round(min[1], 2)}'
 
 
 def generateData(step, flag):
@@ -319,11 +359,13 @@ def generateData(step, flag):
     Output('maxX', 'value'),
     Output('minZ', 'value'),
     Output('maxZ', 'value'),
+    Output('plotROI', 'figure'),
     Input('plot', 'relayoutData'),
+    # State('plotROI', 'figure'),
     prevent_initial_call=True
 )
 def updateByPlot(data):
-    #print(f"from zoom {relayoutData}")
+    global figROI, traces
     if ('xaxis.range[0]' in data) and ('yaxis.range[0]' in data) == True:
         minX = round(data['xaxis.range[0]'], 2)
         maxX = round(data['xaxis.range[1]'], 2)
@@ -331,13 +373,26 @@ def updateByPlot(data):
         maxZ = round(data['yaxis.range[1]'], 2)
     else:
         minX, maxX, minZ, maxZ = scanner.MINX, scanner.MAXX, scanner.MINZ, scanner.MAXZ
-    return 'plot zoomed', data, minX, maxX, minZ, maxZ
+    # trace2 = go.Scatter()
+    # print(figure['data'])
+    # figROI.update_traces(traces)
+    # figROI.add_trace(traces[0])
+    # figROI.add_trace(traces[1])
+    # print(figROI['data'][1]['x'])
+    command = f'SetROI1_mm={round(minX, 0)},{round(minZ, 0)},{round(maxX, 0)},{round(maxZ, 0)}\r'
+    print(f'command: {command}')
+    scanner.writeToSensor(pointer, scanner.lib, command)
+    figROI['data'][1]['x'] = (minX, maxX, maxX, minX, minX)
+    figROI['data'][1]['y'] = (minZ, minZ, maxZ, maxZ, minZ)
+    # figROI.add_trace(go.Scatter(x=figure['data'][0]['x'], y=figure['data'][0]['y']))
+    return 'plot zoomed', data, minX, maxX, minZ, maxZ, figROI
 
 
 #zoom by ROI
 @callback(
     Output('logInformation', 'children', allow_duplicate=True),
     Output('ROI', 'data', allow_duplicate=True),
+    Output('plotROI', 'figure', allow_duplicate=True),
     Input('aplayROI', 'n_clicks'),
     State('minX', 'value'),
     State('maxX', 'value'),
@@ -346,6 +401,7 @@ def updateByPlot(data):
     prevent_initial_call=True
 )
 def updateByROI(n_clicks, minX, maxX, minZ, maxZ):
+    global figROI
     #print(f"from zoom {minX, maxX, minZ, maxZ}")
     data = {}
     data['xaxis.range[0]'] = minX
@@ -355,8 +411,36 @@ def updateByROI(n_clicks, minX, maxX, minZ, maxZ):
     command = f'SetROI1_mm={round(minX, 0)},{round(minZ, 0)},{round(maxX, 0)},{round(maxZ, 0)}\r'
     print(f'command: {command}')
     scanner.writeToSensor(pointer, scanner.lib, command)
-    return 'ROI zoomed', data
+    figROI['data'][1]['x'] = (minX, maxX, maxX, minX, minX)
+    figROI['data'][1]['y'] = (minZ, minZ, maxZ, maxZ, minZ)
+    return 'ROI zoomed', data, figROI
 
+
+#reset ROI
+@callback(
+    Output('logInformation', 'children', allow_duplicate=True),
+    Output('ROI', 'data', allow_duplicate=True),
+    Output('plotROI', 'figure', allow_duplicate=True),
+    Output('minX', 'value', allow_duplicate=True),
+    Output('maxX', 'value', allow_duplicate=True),
+    Output('minZ', 'value', allow_duplicate=True),
+    Output('maxZ', 'value', allow_duplicate=True),
+    Input('resetROI', 'n_clicks'),
+    prevent_initial_call=True
+)
+def resetROI(n_clicks):
+    global figROI
+    data = {}
+    data['xaxis.range[0]'] = scanner.MINX
+    data['xaxis.range[1]'] = scanner.MAXX
+    data['yaxis.range[0]'] = scanner.MINZ
+    data['yaxis.range[1]'] = scanner.MAXZ
+    figROI['data'][1]['x'] = (scanner.MINX, scanner.MAXX, scanner.MAXX, scanner.MINX, scanner.MINX)
+    figROI['data'][1]['y'] = (scanner.MINZ, scanner.MINZ, scanner.MAXZ, scanner.MAXZ, scanner.MINZ)
+    command = f'SetROI1_mm={scanner.MINX},{scanner.MINZ},{scanner.MAXX},{scanner.MAXZ}\r'
+    print(f'command: {command}')
+    scanner.writeToSensor(pointer, scanner.lib, command)
+    return 'ROI reset', data, figROI, scanner.MINX, scanner.MAXX, scanner.MINZ, scanner.MAXZ
 
 #fix baseline
 @callback(
