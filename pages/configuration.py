@@ -92,9 +92,9 @@ layout = html.Div([
                         dbc.CardHeader("Geometry settings"),
                         dbc.CardBody([
                             dbc.InputGroup([
-                                dbc.Button("Fix baseline", id="fixBaseline", outline=True, color="primary"),
+                                dbc.Button("Fix baseline", id="fixBaseline", outline=True, color="primary", size="sm"),
                                 dbc.Input(id="baseline", value="0", type="number"),
-                            ], size="sm"),
+                            ]),
                             html.Br(),
                             dbc.InputGroup([
                                 dbc.InputGroup([
@@ -191,7 +191,9 @@ layout = html.Div([
     dcc.Interval('interval', interval=INTERVAL, n_intervals=0, max_intervals=0),
     dcc.Store(id='connectionStatus', data=0),
     dcc.Store(id='ROI'),
-    dcc.Store(id='baselineStore')
+    dcc.Store(id='baselineStore'),
+    dcc.Store(id='intensity'),
+    dcc.Store(id='width')
 ])
 
 
@@ -212,19 +214,25 @@ def pathSelection(path):
     Input('saveFrame', 'n_clicks'),
     State('currentPath', 'value'),
     State('plot', 'figure'),
+    State('intensity', 'data'),
+    State('width', 'data'),
     prevent_initial_call=True
 )
-def saveFrame(n_clicks, value, fig):
+def saveFrame(n_clicks, value, fig, intensity, width):
     currentTime = dt.datetime.now().strftime('%Hh_%Mm_%Ss')
     print(value)
     print(f'saved to {value}{currentTime}')
     # print(fig.get('data')[0]['x'])
     # print(fig.get('data')[0]['y'])
     # define NumPy array
-    data = np.array([np.around(fig.get('data')[0]['x'], 4), np.around(fig.get('data')[0]['y'], 4)])
+    data = np.array([np.around(fig.get('data')[0]['x'], 4),
+                     np.around(fig.get('data')[0]['y'], 4),
+                     np.around(intensity, 4),
+                     np.around(width, 4)])
     # print(data)
     # export array to CSV file
     np.savetxt(f'{value}\\{currentTime}.csv', data, fmt="%1.2f", delimiter=",")
+
     return f'saved to {value}{currentTime}.csv'
 
 
@@ -261,7 +269,7 @@ def connection(n_clicks, data):
         res = scanner.resetDllFiFo(scanner.lib, pointer)
         count = 0
         while True:
-            dataLength, bufX, bufZ, bufIntensity = scanner.getXZIExtended(scanner.lib, pointer)
+            dataLength, bufX, bufZ, bufIntensity, bufSignalWidth = scanner.getXZIExtended(scanner.lib, pointer)
             if dataLength == -1:
                 print(f'Buffer is cleaned {dataLength}({count}) first time')
                 break
@@ -277,6 +285,8 @@ def connection(n_clicks, data):
 @callback(
     Output('plot', 'figure', allow_duplicate=True),
     Output('logInformation', 'children', allow_duplicate=True),
+    Output('intensity', 'data'),
+    Output('width', 'data'),
     Input('interval', 'n_intervals'),
     Input('ROI', 'data'),
     Input('baselineStore', 'data'),
@@ -299,7 +309,7 @@ def update_intervals(n_intervals, data, baseline, s):
         maxZ = data['yaxis.range[1]']
     else:
         minX, maxX, minZ, maxZ = scanner.MINX, scanner.MAXX, scanner.MINZ, scanner.MAXZ
-    arr1, arr2, min = generateData(n_intervals, s)
+    arr1, arr2, min, arr3, arr4 = generateData(n_intervals, s)
     # fig = go.Figure()
     fig = go.Figure(data=go.Scattergl(x=arr1, y=arr2,
                                       mode='markers',
@@ -315,18 +325,27 @@ def update_intervals(n_intervals, data, baseline, s):
 
     # with open('data.txt', 'a') as f:
     #     f.write(f'{min[0]}, {min[1]};\n')
-    return fig, f'{round(min[0], 2)}, {round(min[1], 2)}'
+
+    return fig, f'{round(min[0], 2)}, {round(min[1], 2)}', arr3, arr4
 
 
 def generateData(step, flag):
     global pointer
     if not flag:
-        x0 = 0
-        x1 = np.pi
-        arr1 = np.linspace(x0, x1, POINTS)
-        s = 2*np.pi/POINTS
-        arr2 = arr1*0
-        arr2 = -1*abs(np.sin((arr1 + 10*s*step)*0.5) + np.cos((arr1 + 10*s*step)*2))
+        # x0 = 0
+        # x1 = np.pi
+        # arr1 = np.linspace(x0, x1, POINTS)
+        # s = 2*np.pi/POINTS
+        # arr2 = arr1*0
+        # arr2 = -1*abs(np.sin((arr1 + 10*s*step)*0.5) + np.cos((arr1 + 10*s*step)*2))
+        arr1 = np.linspace(-31,31, 500)
+        x = arr1 + step
+        # arr2 = 116 + (100 * np.sin(0.1 * x) + 50 * np.cos(0.2 * x) + 20 * np.sin(0.3 * x) - 10 * np.cos(0.4 * x))
+        arr2 = np.clip(121 - 45 * np.sin(0.1 * x) - 20 * np.cos(0.2 * x) - 10 * np.sin(0.3 * x) + 5 * np.cos(0.4 * x) - 8 * np.sin(0.6 * x) + 0.5 * x, 80, 158)
+        arr3 = np.empty(POINTS)
+        arr3[:] = step
+        arr4 = np.empty(POINTS)
+        arr4[:] = step*10
     else:
         if scanner.resetDllFiFo(scanner.lib, pointer): print("Reset DLL FiFo UNsuccessful!")
         # print(f'Reset DLL FiFo result: {scanner.resetDllFiFo(scanner.lib, pointer)}')
@@ -337,8 +356,8 @@ def generateData(step, flag):
         #         print(f'Buffer is cleaned {dataLength}({count})')
         #         break
         #     count += 1
-        dataLength, arrX, arrZ, bufIntensity = scanner.getXZIExtended(scanner.lib, pointer)
-        arr1, arr2 = scanner.transformData(arrX, arrZ, bufIntensity)
+        dataLength, arrX, arrZ, bufIntensity, bufSignalWidth = scanner.getXZIExtended(scanner.lib, pointer)
+        arr1, arr2, arr3, arr4 = scanner.transformData(arrX, arrZ, bufIntensity, bufSignalWidth)
     # print(f'len {len(arr1), len(arr2)}')
     # min = []
     if len(arr2):
@@ -348,7 +367,7 @@ def generateData(step, flag):
         min = [0, 0]
     # print(max)
 
-    return arr1, arr2, min
+    return arr1, arr2, min, arr3, arr4
 
 
 #zoom by plot
@@ -533,7 +552,7 @@ def logInfo(n_intervals, typeValue, patchedValue):
 def updateData(n_clicks):
     global fig
     optimizationType = 'opengl'
-    arr1, arr2, max = generateData(0, 0)
+    arr1, arr2, max, arr3, arr4 = generateData(0, 0)
     if optimizationType == 'standard':
         fig = go.Figure(data=go.Scatter(x=arr1, y=arr2,
                                         mode='markers',

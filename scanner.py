@@ -154,23 +154,24 @@ def getXZIExtended(lib, pointer):
     #         i += 1
     # print(f"Number of valid points is: {i}")
 
-    return dataLength, bufX, bufZ, bufIntensity
+    return dataLength, bufX, bufZ, bufIntensity, bufSignalWidth
 
 
-def transformData(bufX, bufZ, bufIntensity):
+def transformData(bufX, bufZ, bufIntensity, bufSignalWidth):
     X = np.array(bufX)
     Z = np.array(bufZ)
     I = np.array(bufIntensity)
-
+    W = np.array(bufSignalWidth)
     #arrX = X[np.logical_and(X != 0, Z != 0, I != 0)]
-    arrX = X[(X != 0) & (Z != 0) & (I != 0)]
+    arrX = X[(X != 0) & (Z != 0) & (I != 0) & (W != 0)]
     # print(f'len X: {len(arrX)}, X: {arrX[0:10]}')
     # arrZ = Z[np.logical_and(X != 0, Z != 0, I != 0)]
-    arrZ = Z[(X != 0) & (Z != 0) & (I != 0)]
+    arrZ = Z[(X != 0) & (Z != 0) & (I != 0) & (W != 0)]
     # print(f'len Z: {len(arrZ)}, Z: {arrZ[0:10]}')
     # arrI = I[np.logical_and(X != 0, Z != 0, I != 0)]
-    arrI = I[(X != 0) & (Z != 0) & (I != 0)]
+    arrI = I[(X != 0) & (Z != 0) & (I != 0) & (W != 0)]
     # print(f'len I: {len(arrI)}, I: {arrI[0:10]}')
+    arrW = W[(X != 0) & (Z != 0) & (I != 0) & (W != 0)]
 
     # arr = np.array([arrX, arrZ, arrI])
     # if arrX.size:
@@ -182,7 +183,7 @@ def transformData(bufX, bufZ, bufIntensity):
     # arr1 = np.array(arrX)
     # arr2 = np.array(arrZ)
 
-    return arrX, arrZ #arr, minZ
+    return arrX, arrZ, arrI, arrW
 
 
 def makeFig(arr):
