@@ -6,17 +6,28 @@ import plotly.graph_objects as go
 import datetime as dt
 import os
 import scanner
+import socket, time
 # from scanner import connect, getInfo, getXZIExtended, makeFig
+
+UDP_IP = "192.168.254.7"
+UDP_PORT = 12000 #port for get status of IO-01 request
+UDP_PORT2 = 11000 #port for get current coordinate request
+MESSAGE = b"123,1,10010,1,0,123" #get status of IO-01 request
+MESSAGE2 = b"123,2,1,12" #get current coordinate request
+SOCKET = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+numberOfFrame = 0
+INTERVAL_ROBOT = 100
 
 pointer, status = None, None
 PATH = os.getcwd()
 DICTSUBFOLDERS = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_dir()]
+DICTSUBFOLDERS.append(dict({'label': PATH, 'value': PATH}))
 DICTSUBFOLDERS.append(dict({'label': 'local paths are only available', 'value': 'local', 'disabled': True}))
 # print(DICTSUBFOLDERS)
 #INTERVAL in msec 33.33ms/30FPS 16.66ms/60FPS
 # INTERVAL = 17
-INTERVAL = 33
-# INTERVAL = 50
+INTERVAL_SCANNER = 33
+# INTERVAL_SCANNER = 50
 POINTS = 1280
 #POINTS = 2560
 START, STOP, RUNTIME, PROGTIME, INT = dt.datetime.now().timestamp()+1, 0, 0, 0, -1
@@ -71,20 +82,21 @@ layout = html.Div([
                                 dbc.InputGroupText("IP"),
                                 dbc.Input(id="ip", value="192.168.255.8", placeholder="192.168.255.8"),
                                 dbc.InputGroupText("Status"),
-                                dbc.Input(id="status", value="OFF", disabled=True)
+                                dbc.Input(id="status", value="OFF", invalid=True, disabled=True)
                             ], size="sm"),
                             html.Br(),
                             dbc.InputGroup([
                                 dbc.InputGroupText("Port"),
                                 dbc.Input(id="port", value="32001", placeholder="32001", type="number"),
                                 dbc.InputGroupText("Frequency"),
-                                dbc.Input(id="frequency", value=INTERVAL, placeholder="30", type="number"),
+                                dbc.Input(id="frequency", value=INTERVAL_SCANNER, placeholder="30", type="number"),
                             ], size="sm"),
                             html.Br(),
                             dbc.ButtonGroup([
                                 dbc.Button("Connect", id="connect", outline=True, color="primary"),
                                 dbc.Button("Disconnect", id="disconnect", outline=True, color="primary"),
-                                dbc.Button("Update frequency", id="updateFrequency", outline=True, color="primary")
+                                dbc.Button("Update frequency", id="updateFrequency", outline=True, color="primary"),
+                                dbc.Button("Sync robot", id="syncRobot", outline=True, color="primary")
                             ], size="sm")
                         ])
                     ]),
@@ -125,7 +137,7 @@ layout = html.Div([
                             ], size="sm"),
                             dbc.InputGroup([
                                 dbc.InputGroupText("Current folder"),
-                                dbc.Input(id="currentPath", value=PATH, disabled=True)
+                                dbc.Input(id="currentPath", value=PATH.split('\\')[-1], disabled=True)
                             ], size="sm"),
                             dbc.Button("Save frame", id="saveFrame", outline=True, color="primary", size="sm"),
                         ])
@@ -158,11 +170,6 @@ layout = html.Div([
                             dcc.Graph(id='plotROI',
                                       figure=figROI,
                                       config={"displayModeBar": False}
-                                      # figure=go.Figure(data=go.Scatter(x=[scanner.MINX+scanner.DELTA, scanner.MAXX-scanner.DELTA, scanner.MAXX, scanner.MINX, scanner.MINX+scanner.DELTA],
-                                      #                                  y=[scanner.MINZ, scanner.MINZ, scanner.MAXZ, scanner.MAXZ, scanner.MINZ],
-                                      #                                  mode='lines',
-                                      #                                  line=dict(color='red'))
-                                      #                  )
                                       ),
                         ],
                         width=4),
@@ -170,92 +177,47 @@ layout = html.Div([
                             dcc.Graph(id='plot',
                                       figure=go.Figure(),
                                       config={"displayModeBar": False}
-                                      # figure=fig
-
-                                      # figure=go.Figure(data=go.Scatter(x=[], y=[],
-                                      #                                  mode='markers',
-                                      #                                  marker=dict(size=1, color='green', showscale=False))
-                                      #                  )
                                       ),
                         ],
                         width=8),
                     ]),
-                    html.H5('Log info:'),
-                    html.Output(id='logInformation'),
+                    dbc.Row([
+                        dbc.Col([
+                            html.H6('Log scanner info:'),
+                            html.Output(id='logScanInfo'),
+                        ]),
+                        dbc.Col([
+                            html.H6('Log robot info:'),
+                            html.Output(id='logRobotInfo'),
+                        ]),
+                    ]),
                     html.Br(),
                 ])
             ]),
         ],
         width=8),
     ]),
-    dcc.Interval('interval', interval=INTERVAL, n_intervals=0, max_intervals=0),
+    html.Br(),
+    dcc.Interval('intervalScanner', interval=INTERVAL_SCANNER, n_intervals=0, max_intervals=0),
+    dcc.Interval('intervalRobot', interval=INTERVAL_ROBOT, n_intervals=0, max_intervals=0),
     dcc.Store(id='connectionStatus', data=0),
     dcc.Store(id='ROI'),
     dcc.Store(id='baselineStore'),
     dcc.Store(id='intensity'),
-    dcc.Store(id='width')
+    dcc.Store(id='arrX'),
+    dcc.Store(id='arrZ'),
+    dcc.Store(id='width'),
+    dcc.Store(id='currentCoord')
 ])
-
-
-#path selection
-@callback(
-    Output('currentPath', 'value'),
-    Input('paths', 'value'),
-    prevent_initial_call=True
-)
-def pathSelection(path):
-    # print(path)
-    return path
-
-
-#save frame
-@callback(
-    Output('logInformation', 'children', allow_duplicate=True),
-    Input('saveFrame', 'n_clicks'),
-    State('currentPath', 'value'),
-    State('plot', 'figure'),
-    State('intensity', 'data'),
-    State('width', 'data'),
-    prevent_initial_call=True
-)
-def saveFrame(n_clicks, value, fig, intensity, width):
-    currentTime = dt.datetime.now().strftime('%Hh_%Mm_%Ss')
-    print(value)
-    print(f'saved to {value}{currentTime}')
-    # print(fig.get('data')[0]['x'])
-    # print(fig.get('data')[0]['y'])
-    # define NumPy array
-    data = np.array([np.around(fig.get('data')[0]['x'], 4),
-                     np.around(fig.get('data')[0]['y'], 4),
-                     np.around(intensity, 4),
-                     np.around(width, 4)])
-    # print(data)
-    # export array to CSV file
-    np.savetxt(f'{value}\\{currentTime}.csv', data, fmt="%1.2f", delimiter=",")
-
-    return f'saved to {value}{currentTime}.csv'
-
-
-#update frequency
-@callback(
-    Output('logInformation', 'children', allow_duplicate=True),
-    Output('interval', 'interval'),
-    Input('updateFrequency', 'n_clicks'),
-    State('frequency', 'value'),
-    prevent_initial_call=True
-)
-def updateFrequency(n_clicks, value):
-    global INTERVAL
-    INTERVAL = int(1000/value)
-    print(f'update frequency in ms: {INTERVAL}')
-    return f'update frequency in ms: {INTERVAL}', INTERVAL
 
 
 #connection
 @callback(
-    Output('logInformation', 'children', allow_duplicate=True),
+    Output('logScanInfo', 'children', allow_duplicate=True),
     Output('connectionStatus', 'data'),
     Output('status', 'value'),
+    Output('status', 'valid'),
+    Output('status', 'invalid'),
     Input('connect', 'n_clicks'),
     State('connectionStatus', 'data'),
     prevent_initial_call=True
@@ -278,28 +240,114 @@ def connection(n_clicks, data):
         if status: strStatus = "ON"
     else: strStatus = "ON"
 
-    return f"connection status: {status}", status, strStatus
+    return f"connection status: {status}", status, strStatus, status, not(status)
 
 
-#update intervals with ROI
+#update frequency
+@callback(
+    Output('logScanInfo', 'children', allow_duplicate=True),
+    Output('intervalScanner', 'interval'),
+    Input('updateFrequency', 'n_clicks'),
+    State('frequency', 'value'),
+    prevent_initial_call=True
+)
+def updateFrequency(n_clicks, value):
+    global INTERVAL_SCANNER
+    INTERVAL_SCANNER = int(1000/value)
+    print(f'update frequency in ms: {INTERVAL_SCANNER}')
+    return f'update frequency in ms: {INTERVAL_SCANNER}', INTERVAL_SCANNER
+
+
+#sync with robot
+@callback(
+    Output('logRobotInfo', 'children'),
+    Output('intervalRobot', 'n_intervals'),
+    Output('intervalRobot', 'max_intervals'),
+    Input('syncRobot', 'n_clicks'),
+    State('intervalRobot', 'n_intervals'),
+    prevent_initial_call=True
+)
+def syncRobot(n_clicks, n_intervals):
+    print(f'start synchronization with robot')
+    return 'start synchronization with robot', n_intervals, 36000000
+
+
+#update intervals robot
+@callback(
+    Output('logRobotInfo', 'children', allow_duplicate=True),
+    Input('intervalRobot', 'n_intervals'),
+    State('currentPath', 'value'),
+    State('arrX', 'data'),
+    State('arrZ', 'data'),
+    State('intensity', 'data'),
+    State('width', 'data'),
+    prevent_initial_call=True,
+)
+def updateIntervalsRobot(n_intervals, value, arrX, arrZ, intensity, width):
+    global numberOfFrame, MESSAGE, UDP_IP, UDP_PORT
+    currentTime = dt.datetime.now().strftime('%Hh_%Mm_%Ss')
+    if value == PATH.split('\\')[-1]: value = './'
+
+    SOCKET = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    SOCKET.sendto(MESSAGE, (UDP_IP, UDP_PORT))
+    response = SOCKET.recv(1024).decode()
+    status = response.split(",")[2]
+    if status == '1':
+        numberOfFrame += 1
+        msg = f'frame saved {numberOfFrame} times'
+        SOCKET.sendto(MESSAGE2, (UDP_IP, UDP_PORT2))
+        response = SOCKET.recv(1024).decode()
+        coord = response.split(",")[2:8]
+        print(msg, coord)
+        SOCKET.close()
+        data = np.array([np.around(arrX, 4),
+                         np.around(arrZ, 4),
+                         np.around(intensity, 4),
+                         np.around(width, 4)])
+        np.savetxt(f'{value}\\{currentTime}.txt', data, fmt="%1.4f")
+        with open(f'{value}\\{currentTime}.txt', 'a') as file:
+            print(*coord, file=file, sep=' ')
+        print(f'saved to {value}\\{currentTime}')
+        # time.sleep(0.01)
+    else:
+        msg = f'no signal ({n_intervals})'
+        print(msg)
+    return msg
+    # return n_intervals
+
+
+#fix baseline
+@callback(
+    Output('baselineStore', 'data'),
+    Input('fixBaseline', 'n_clicks'),
+    State('baseline', 'value'),
+    prevent_initial_call=True
+)
+def fixBaseline(n_clicks, value):
+    print(f'baseline: {value}')
+    return value
+
+
+#update intervals scanner with ROI
 @callback(
     Output('plot', 'figure', allow_duplicate=True),
-    Output('logInformation', 'children', allow_duplicate=True),
+    Output('logScanInfo', 'children', allow_duplicate=True),
+    Output('arrX', 'data'),
+    Output('arrZ', 'data'),
     Output('intensity', 'data'),
     Output('width', 'data'),
-    Input('interval', 'n_intervals'),
+    Input('intervalScanner', 'n_intervals'),
     Input('ROI', 'data'),
     Input('baselineStore', 'data'),
     State('connectionStatus', 'data'),
     # State('plot', 'figure'),
     prevent_initial_call=True,
 )
-def update_intervals(n_intervals, data, baseline, s):
+def updateIntervalsScanner(n_intervals, data, baseline, status):
     global START, STOP, RUNTIME, PROGTIME, INT
-    # global fig
     INT += 1
     if not (RUNTIME):
-        msg = f'({POINTS} points): count {INT} (progtime in sec: {INTERVAL * INT / 1000} and realtime: {int(dt.datetime.now().timestamp() - START)})'
+        msg = f'({POINTS} points): count {INT} (progtime in sec: {INTERVAL_SCANNER * INT / 1000} and realtime: {int(dt.datetime.now().timestamp() - START)})'
     else:
         msg = f'({POINTS} points): count {INT} (progtime in sec: {PROGTIME} and realtime: {int(RUNTIME)})'
     if ('xaxis.range[0]' in data) and ('yaxis.range[0]' in data) == True:
@@ -309,14 +357,13 @@ def update_intervals(n_intervals, data, baseline, s):
         maxZ = data['yaxis.range[1]']
     else:
         minX, maxX, minZ, maxZ = scanner.MINX, scanner.MAXX, scanner.MINZ, scanner.MAXZ
-    arr1, arr2, min, arr3, arr4 = generateData(n_intervals, s)
-    # fig = go.Figure()
+    arr1, arr2, min, arr3, arr4 = generateData(n_intervals, status)
     fig = go.Figure(data=go.Scattergl(x=arr1, y=arr2,
                                       mode='markers',
                                       marker=dict(size=1, color='green', showscale=False)
                                       ))
     fig.add_trace(go.Scattergl(x=[minX, maxX], y=[baseline, baseline], mode='lines', line_dash='dash', name='baseline'))
-    fig.add_trace(go.Scattergl(x=[min[0]], y=[min[1]], mode="markers+text", text=[round(min[1], 2)], textposition="bottom center"))
+    fig.add_trace(go.Scattergl(x=[min[0]], y=[min[1]], mode="markers+text", text=[round(min[1], 4)], textposition="bottom center"))
     fig.update_xaxes(range=[minX, maxX], tickangle=90, zeroline=False)#dtick=0.2,
     fig.update_yaxes(range=[minZ, maxZ], zeroline=False)#, autorange='reversed')#dtick=0.2,
     fig.update_layout({'xaxis': {'scaleanchor': 'y'}}, showlegend=False)
@@ -326,7 +373,7 @@ def update_intervals(n_intervals, data, baseline, s):
     # with open('data.txt', 'a') as f:
     #     f.write(f'{min[0]}, {min[1]};\n')
 
-    return fig, f'{round(min[0], 2)}, {round(min[1], 2)}', arr3, arr4
+    return fig, f'{round(min[0], 4)}, {round(min[1], 4)}', arr1, arr2, arr3, arr4
 
 
 def generateData(step, flag):
@@ -372,7 +419,7 @@ def generateData(step, flag):
 
 #zoom by plot
 @callback(
-    Output('logInformation', 'children', allow_duplicate=True),
+    Output('logScanInfo', 'children', allow_duplicate=True),
     Output('ROI', 'data'),
     Output('minX', 'value'),
     Output('maxX', 'value'),
@@ -409,7 +456,7 @@ def updateByPlot(data):
 
 #zoom by ROI
 @callback(
-    Output('logInformation', 'children', allow_duplicate=True),
+    Output('logScanInfo', 'children', allow_duplicate=True),
     Output('ROI', 'data', allow_duplicate=True),
     Output('plotROI', 'figure', allow_duplicate=True),
     Input('aplayROI', 'n_clicks'),
@@ -437,7 +484,7 @@ def updateByROI(n_clicks, minX, maxX, minZ, maxZ):
 
 #reset ROI
 @callback(
-    Output('logInformation', 'children', allow_duplicate=True),
+    Output('logScanInfo', 'children', allow_duplicate=True),
     Output('ROI', 'data', allow_duplicate=True),
     Output('plotROI', 'figure', allow_duplicate=True),
     Output('minX', 'value', allow_duplicate=True),
@@ -461,86 +508,62 @@ def resetROI(n_clicks):
     scanner.writeToSensor(pointer, scanner.lib, command)
     return 'ROI reset', data, figROI, scanner.MINX, scanner.MAXX, scanner.MINZ, scanner.MAXZ
 
-#fix baseline
+
+#path selection
 @callback(
-    Output('baselineStore', 'data'),
-    Input('fixBaseline', 'n_clicks'),
-    State('baseline', 'value'),
+    Output('currentPath', 'value'),
+    Input('paths', 'value'),
     prevent_initial_call=True
 )
-def fixBaseline(n_clicks, value):
-    print(f'baseline: {value}')
-    return value
+def pathSelection(path):
+    print(path.split('\\')[-1])
+    return path.split('\\')[-1]
 
 
-#start
+#save frame
 @callback(
-    Output('interval', 'n_intervals'),
-    Output('interval', 'max_intervals'),
-    Input('start', 'n_clicks'),
-    State('interval', 'n_intervals'),
-    prevent_initial_call=True,
+    Output('logScanInfo', 'children', allow_duplicate=True),
+    Input('saveFrame', 'n_clicks'),
+    State('currentPath', 'value'),
+    State('plot', 'figure'),
+    State('arrX', 'data'),
+    State('arrZ', 'data'),
+    State('intensity', 'data'),
+    State('width', 'data'),
+    prevent_initial_call=True
 )
-def start(n_clicks, n_intervals):
-    global START, STOP, RUNTIME, PROGTIME, INT
-    STOP = 0
-    RUNTIME, PROGTIME, INT = 0, 0, 0
-    START = dt.datetime.now().timestamp()
-    return n_intervals, 36000000#303
+def saveFrame(n_clicks, value, fig, arrX, arrZ, intensity, width):
+    currentTime = dt.datetime.now().strftime('%dd_%mm_%yy__%Hh_%Mm_%Ss')
+    if value == PATH.split('\\')[-1]: value = './'
+    print(f'will be saved to {value}\\{currentTime}')
+    # print(fig.get('data')[0]['x'])
+    # print(fig.get('data')[0]['y'])
+    # define NumPy array
+    # data = np.array([np.around(fig.get('data')[0]['x'], 4),
+    #                  np.around(fig.get('data')[0]['y'], 4),
+    #                  np.around(intensity, 4),
+    #                  np.around(width, 4)])
+    # data = np.array([np.around(arrX, 4),
+    #                  np.around(arrZ, 4),
+    #                  np.around(intensity, 4),
+    #                  np.around(width, 4)])
+    # np.savetxt(f'{value}\\{currentTime}.csv', data, fmt="%1.4f", delimiter=",")
+    SOCKET = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    SOCKET.sendto(MESSAGE2, (UDP_IP, UDP_PORT2))
+    response = SOCKET.recv(1024).decode()
+    coord = response.split(",")[2:8]
+    print(coord)
+    SOCKET.close()
+    data = np.array([np.around(arrX, 4),
+                     np.around(arrZ, 4),
+                     np.around(intensity, 4),
+                     np.around(width, 4)])
+    np.savetxt(f'{value}\\{currentTime}.txt', data, fmt="%1.4f")
+    with open(f'{value}\\{currentTime}.txt', 'a') as file:
+        print(*coord, file=file, sep=' ')
+    print(f'saved to {value}\\{currentTime}')
 
-
-#pause
-@callback(
-    Output('interval', 'max_intervals', allow_duplicate=True),
-    Input('pause', 'n_clicks'),
-    State('interval', 'n_intervals'),
-    prevent_initial_call=True,
-)
-def pause(n_clicks, n_intervals):
-    global START, STOP, RUNTIME, PROGTIME, INT
-    STOP = dt.datetime.now().timestamp()
-    RUNTIME = STOP - START
-    PROGTIME = INTERVAL*n_intervals/1000
-    START = STOP
-    INT = n_intervals
-    return 0
-
-
-#stop
-@callback(
-    Output('interval', 'max_intervals', allow_duplicate=True),
-    Output('interval', 'n_intervals', allow_duplicate=True),
-    Input('stop', 'n_clicks'),
-    State('interval', 'n_intervals'),
-    prevent_initial_call=True,
-)
-def stop(n_clicks, n_intervals):
-    global START, STOP, RUNTIME, PROGTIME, INT
-    STOP = dt.datetime.now().timestamp()
-    PROGTIME = INTERVAL * n_intervals / 1000
-    RUNTIME = STOP - START
-    INT = n_intervals
-    return 0, 0
-
-"""
-#timer output
-@callback(
-    Output('logInfo', 'children'),
-    Input('interval', 'n_intervals'),
-    Input('optimizationType', 'value'),
-    Input('patched', 'value'),
-    prevent_initial_call=True,
-)
-def logInfo(n_intervals, typeValue, patchedValue):
-    global START, STOP, RUNTIME, PROGTIME, INT
-    if not(RUNTIME):
-        return f'with {typeValue} method with {patchedValue} ({POINTS} points):{INT} (progtime in sec: {INTERVAL*INT/1000} and realtime: {int(dt.datetime.now().timestamp() - START)})'
-    else:
-        return f'with {typeValue} method with {patchedValue} ({POINTS} points):{INT} (progtime in sec: {PROGTIME} and realtime: {int(RUNTIME)})'
-    #RUNTIME = dt.datetime.now().timestamp() - START
-    #return f'with {value} method ({POINTS} points):{n_intervals} (progtime in sec: {INTERVAL*n_intervals/1000} and realtime: {int(RUNTIME)})'
-    #return f'with {value} method ({POINTS} points):{n_intervals} (progtime in sec: {PROGTIME} and realtime: {int(RUNTIME)})'
-"""
+    return f'saved to {value}\\{currentTime}.txt'
 
 
 #data generation
@@ -579,3 +602,53 @@ def updateNextData(n_clicks):
                                     marker=dict(size=1, color='green', showscale=False)
                                     ))
     return fig
+
+
+#start
+@callback(
+    Output('intervalScanner', 'n_intervals'),
+    Output('intervalScanner', 'max_intervals'),
+    Input('start', 'n_clicks'),
+    State('intervalScanner', 'n_intervals'),
+    prevent_initial_call=True,
+)
+def start(n_clicks, n_intervals):
+    global START, STOP, RUNTIME, PROGTIME, INT
+    STOP = 0
+    RUNTIME, PROGTIME, INT = 0, 0, 0
+    START = dt.datetime.now().timestamp()
+    return n_intervals, 36000000#303
+
+
+#pause
+@callback(
+    Output('intervalScanner', 'max_intervals', allow_duplicate=True),
+    Input('pause', 'n_clicks'),
+    State('intervalScanner', 'n_intervals'),
+    prevent_initial_call=True,
+)
+def pause(n_clicks, n_intervals):
+    global START, STOP, RUNTIME, PROGTIME, INT
+    STOP = dt.datetime.now().timestamp()
+    RUNTIME = STOP - START
+    PROGTIME = INTERVAL_SCANNER*n_intervals/1000
+    START = STOP
+    INT = n_intervals
+    return 0
+
+
+#stop
+@callback(
+    Output('intervalScanner', 'max_intervals', allow_duplicate=True),
+    Output('intervalScanner', 'n_intervals', allow_duplicate=True),
+    Input('stop', 'n_clicks'),
+    State('intervalScanner', 'n_intervals'),
+    prevent_initial_call=True,
+)
+def stop(n_clicks, n_intervals):
+    global START, STOP, RUNTIME, PROGTIME, INT
+    STOP = dt.datetime.now().timestamp()
+    PROGTIME = INTERVAL_SCANNER * n_intervals / 1000
+    RUNTIME = STOP - START
+    INT = n_intervals
+    return 0, 0
