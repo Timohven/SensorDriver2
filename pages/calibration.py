@@ -1,17 +1,34 @@
 import dash
 from dash import html, dcc, callback, Output, Input, State, Patch
 import dash_bootstrap_components as dbc
+import dash_ag_grid as dag
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import os
 import math
 from utilities import matrices
+import objects
 
 PATH = os.getcwd()
 DICTSUBFOLDERS = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_dir()]
 DICTSUBFOLDERS.append(dict({'label': PATH, 'value': PATH}))
 DICTSUBFOLDERS.append(dict({'label': 'local paths are only available', 'value': 'local', 'disabled': True}))
 CURTXT = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
+
+data = []
+# df = pd.DataFrame.from_dict(data)
+df = pd.DataFrame(data, columns=['frame',
+                                 'UF1 Ry',
+                                 'Teta: Z axis UF1',
+                                 'Gamma: X axis UF1',
+                                 'h calculated',
+                                 'top edge',
+                                 'errorA',
+                                 'errorD'
+                                 ])
+
+
 
 dash.register_page(__name__, path='/calibration')
 layout = html.Div([
@@ -32,6 +49,7 @@ layout = html.Div([
                     dbc.Label("Choose frames", size="sm"),
                     dbc.Checklist(id='frames2', options=CURTXT, style={'font-size': '8px'}),
                     dbc.Button("Open frames", id="openFrames2", outline=True, color="primary", size="sm"),
+                    dbc.Button("Save report", id="saveReport", outline=True, color="primary", size="sm"),
                 ]),
             ]),
             html.Br(),
@@ -52,7 +70,18 @@ layout = html.Div([
                           figure=go.Figure(go.Scatter3d()),
                           # config={"displayModeBar": False}
                 ),
-            ])
+            ]),
+            dbc.Card([
+                dag.AgGrid(
+                    id="resultTable",
+                    columnSize="sizeToFit",
+                    columnDefs=[{'field': columnName} for columnName in df.columns],
+                    defaultColDef={'resizable': True, 'sortable': True, 'filter': True},
+                    rowData=df.to_dict("records"),
+                    csvExportParams={
+                        "fileName": "report.csv",
+                    })
+            ]),
         ], width=9),
     ]),
     dcc.Store(id='currentFrame'),
@@ -96,9 +125,7 @@ def openFrames(n_clicks, val):
                 arr.append([float(x) for x in line2.split()])
         # arr = np.genfromtxt(line, delimiter=',')
         fname = line.split('\\')[-1]
-        print(arr[0])
-        print(arr[1])
-        print(arr[4])
+        print(f'Robot coord: {arr[4]}')
         fig = fig.add_trace(
             go.Scatter(x=arr[0], y=arr[1], mode='markers', marker=dict(size=1, showscale=False), name=f'{i}: {fname}'))
         # data = value
@@ -110,17 +137,35 @@ def openFrames(n_clicks, val):
 
     return fig, arr
 
+
+#save report
+@callback(
+    Output('resultTable', 'exportDataAsCsv'),
+    Input('saveReport', 'n_clicks'),
+    prevent_initial_call=True
+)
+def saveReport(n_clicks):
+    df.to_excel('report.xlsx')#, engine='xlsxwriter')
+    if n_clicks:
+        return True
+    return False
+
+
 #calculate parallel
 @callback(
     Output('calculated', 'children'),
     Output('plotFrames2', 'figure', allow_duplicate=True),
     Output('fig3D', 'figure'),
+    Output('resultTable', 'rowData'),
     Input('calcParallel', 'n_clicks'),
     State('currentFrame', 'data'),
     State('plotFrames2', 'figure'),
+    State('frames2', 'value'),
     prevent_initial_call=True
 )
-def calcParallel(n_clicks, data, fig):
+def calcParallel(n_clicks, data, fig, currentFrame):
+    frame = objects.Frame2D(data[0], data[1])
+    print(frame)
     N = 3 #number of sequential values
     DELTA = 10 #hight difference value
     lim1 = sum(data[1][0:N])/N - DELTA
@@ -137,11 +182,16 @@ def calcParallel(n_clicks, data, fig):
     print(f'A: {A}')
     D = [data[0][-j], data[1][-j]]
     print(f'D: {D}')
-    # print(D, type(D))
-    # print(last, data[0][-j-1], -j-1)
 
-    hCalc1 = B[1] - A[1]
-    hCalc2 = C[1] - D[1]
+    #change A and D received from scanner to the calculated one
+    A = frame.calcA
+    D = frame.calcD
+
+    errorA = frame.errorA
+    errorD = frame.errorD
+
+    hCalc1 = A[1] - B[1]
+    hCalc2 = D[1] - C[1]
     print(f'hCalc1, hCalc2 = {hCalc1, hCalc2}')
     rangeBCx = B[0] - C[0]
     BC = np.linalg.norm(np.array(B) - np.array(C))
@@ -154,18 +204,14 @@ def calcParallel(n_clicks, data, fig):
     newFig.add_trace(go.Scatter(x=[A[0], D[0]], y=[A[1], D[1]],
                                 mode='markers', marker=dict(size=3, color='red', showscale=False),
                                 name=f'range2={rangeADx}, dist2={AD}'))
-    # print(data[0][::2])
-    # arr = data[0, 0,,2]
+    #approximation of a face using a straight line
     x = np.array(data[0][i:-j-1])
     x_np = x.reshape(-1, 1)
     vector_1 = np.ones((x_np.shape[0], 1))
     x_np = np.hstack((vector_1, x_np))
     y = np.array(data[1][i:-j-1])
     y_np = y.reshape(-1, 1)
-    # print(x_np.shape)
-    # print(x_np)
-    # print(y_np.shape)
-    # print(y_np)
+
     ab_np = matrices.matrix_equation(x_np, y_np)
     ab_np = np.around(ab_np, 4)
     a = ab_np[0][0]
@@ -182,15 +228,17 @@ def calcParallel(n_clicks, data, fig):
     newFig.add_trace(go.Scatter(x=[D[0], C[0]], y=[D[1], C[1]],
                                 mode='lines', line_dash='dash', name=f'DC'))
 
+    #finding the point of intersection of lines AB and DC
     # a1x+b1y=c1; a2x+b2y=c2
     # x-y=0; -x-y=-1
     # -kx+y=b
-    k1, b1 = matrices.line(*A, *B)
-    k2, b2 = matrices.line(*D, *C)
-    mM = np.matrix([[-k1, 1], [-k2, 1]])
-    mC = np.matrix([b1, b2])
-    mO = mM.I.dot(mC.T)
-    O = np.asarray(mO).reshape(-1).tolist()
+    # k1, b1 = matrices.line(*A, *B)
+    # k2, b2 = matrices.line(*D, *C)
+    # mM = np.matrix([[-k1, 1], [-k2, 1]])
+    # mC = np.matrix([b1, b2])
+    # mO = mM.I.dot(mC.T)
+    # O = np.asarray(mO).reshape(-1).tolist()
+    O = [0, 0]
     print(f'O: {O}')
 
     kAD = (A[1]-D[1])/(A[0]-D[0])
@@ -213,14 +261,18 @@ def calcParallel(n_clicks, data, fig):
     newFig.update_layout({'xaxis': {'scaleanchor': 'y'}})#, showlegend=False)
 
     #3D lines
-    h = 39
+    h = 39.19
     AB = np.linalg.norm(np.array(A) - np.array(B))
     AO = np.linalg.norm(np.array(A) - np.array(O))
     sinAlfa = h/AB
-    H = sinAlfa * np.linalg.norm(np.array(A)-np.array(O))
     print(f'sin Alfa: {sinAlfa}')
     print(f'AB: {AB}')
     print(f'AO: {AO}')
+
+    # H = sinAlfa * AO
+    sinGamma = h/np.linalg.norm(np.array(centerLaserBC) - np.array(centerLaserAD))
+    print(f'sinGamma={sinGamma}')
+    H = sinGamma * OcenterLaserAD
     print(f'H: {H}')
 
 
@@ -242,8 +294,9 @@ def calcParallel(n_clicks, data, fig):
     AO = np.linalg.norm(np.array(A) - np.array(O))
     OO1 = AO * np.sin(np.arcsin(sinAlfa))
     print(f'OO1: {OO1}')
-
-    Gamma = np.arcsin(H/OcenterLaserAD)
+    print(f'H/OcenterLaserAD {H}/{OcenterLaserAD}: {H/OcenterLaserAD}')
+    # Gamma = np.arcsin(H/OcenterLaserAD)
+    Gamma = np.arcsin(sinGamma)
     print(f'Gamma: {Gamma}')
     print(f'geometric deviation of the laser beam from the Z axis UF1: {90 - np.degrees(Gamma)} degrees')
     centerLaserAD = np.array([0, OcenterLaserAD*np.cos(Gamma), 0])
@@ -379,5 +432,17 @@ def calcParallel(n_clicks, data, fig):
     #                                       center=dict(x=0., y=0., z=0.)))
     # fig3D.update_layout(width=700, height=700, scene_camera_eye_z=0.8)
 
-    return f'dX: {np.degrees(Teta)}, dZ: {90 - np.degrees(Gamma)}', newFig, fig3D
+    new_row = {"frame": currentFrame[-1].split('\\')[-1],
+               "UF1 Ry": data[4][4]/10000,
+               "Teta: Z axis UF1": np.degrees(Teta),
+               "Gamma: X axis UF1": 90 - np.degrees(Gamma),
+               "h calculated": np.abs((hCalc2+hCalc1)/2),
+               "top edge": BC,
+               "errorA": errorA,
+               "errorD": errorD
+               }
+    df.loc[len(df)] = new_row
+    rowData = df.to_dict("records")
+
+    return f'dX: {np.degrees(Teta)}, dZ: {90 - np.degrees(Gamma)}', newFig, fig3D, rowData
 
