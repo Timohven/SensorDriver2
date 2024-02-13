@@ -5,8 +5,9 @@ import dash_ag_grid as dag
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import os
-import math
+# import math
 from utilities import matrices
 import objects
 
@@ -14,18 +15,22 @@ PATH = os.getcwd()
 DICTSUBFOLDERS = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_dir()]
 DICTSUBFOLDERS.append(dict({'label': PATH, 'value': PATH}))
 DICTSUBFOLDERS.append(dict({'label': 'local paths are only available', 'value': 'local', 'disabled': True}))
-CURTXT = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
+CURTXT = [dict({'label': f.path.split('\\')[-1], 'value': f.path}) for f in os.scandir(PATH) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
 
 data = []
 # df = pd.DataFrame.from_dict(data)
 df = pd.DataFrame(data, columns=['frame',
                                  'UF1 Ry',
-                                 'Teta: Z axis UF1',
-                                 'Gamma: X axis UF1',
+                                 'UF1 Rz',
+                                 'Teta(Z and UF1)',
+                                 'Gamma(X and UF1)',
                                  'h calculated',
                                  'top edge',
-                                 'errorA',
-                                 'errorD'
+                                 'errO',
+                                 'errOx',
+                                 'errOy',
+                                 'errA',
+                                 'errD'
                                  ])
 
 
@@ -54,8 +59,13 @@ layout = html.Div([
             ]),
             html.Br(),
             # dbc.InputGroup([
-                dbc.Button("Calculate parallel", id="calcParallel", outline=True, color="primary", size="sm"),
+                dbc.Button("Calculate projection", id="calcParallel", outline=True, color="primary", size="sm"),
                 html.Span("Non yet calculated", id="calculated", style={"verticalAlign": "middle"}),
+                html.Br(),
+                dbc.Button("Restore surface", id="restSurf", outline=True, color="primary", size="sm"),
+                html.Br(),
+                dbc.Button("Calculate coordinates", id="calcCoord", outline=True, color="primary", size="sm"),
+                html.Span("Non yet calculated", id="coordinates", style={"verticalAlign": "middle"}),
             # ], size="sm"),
         ], width=3),
         dbc.Col([
@@ -93,14 +103,17 @@ Output('plotFrames2', 'figure'),
     Output('currentLoadPath2', 'value'),
     Output('frames2', 'options'),
     Output('frames2', 'value'),
+    Output('resultTable', 'rowData'),
     Input('loadPaths2', 'value'),
     prevent_initial_call=True
 )
 def pathSelection(path):
+    if len(df): df.drop(df.index[:], inplace=True)
+
     fig = go.Figure()
-    curtxt = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(path) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
+    curtxt = [dict({'label': f.path.split('\\')[-1], 'value': f.path}) for f in os.scandir(path) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
     print(path.split('\\')[-1])
-    return fig, path.split('\\')[-1], curtxt, []
+    return fig, path.split('\\')[-1], curtxt, [], []
 
 #open frames
 @callback(
@@ -111,7 +124,8 @@ def pathSelection(path):
     prevent_initial_call=True
 )
 def openFrames(n_clicks, val):
-    fig = go.Figure()
+    # fig = go.Figure()
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
     arr = None
     print(f'selected frame: {val}')
     value = []
@@ -126,6 +140,9 @@ def openFrames(n_clicks, val):
         # arr = np.genfromtxt(line, delimiter=',')
         fname = line.split('\\')[-1]
         print(f'Robot coord: {arr[4]}')
+        # intensity bar
+        intensityTrace = go.Bar(x=arr[0], y=arr[2], name='intensity', marker_color='blue', opacity=0.7)
+        fig.add_trace(intensityTrace, secondary_y=True)
         fig = fig.add_trace(
             go.Scatter(x=arr[0], y=arr[1], mode='markers', marker=dict(size=1, showscale=False), name=f'{i}: {fname}'))
         # data = value
@@ -151,41 +168,36 @@ def saveReport(n_clicks):
     return False
 
 
-#calculate parallel
+#calculate projection
 @callback(
     Output('calculated', 'children'),
     Output('plotFrames2', 'figure', allow_duplicate=True),
     Output('fig3D', 'figure'),
-    Output('resultTable', 'rowData'),
+    Output('resultTable', 'rowData', allow_duplicate=True),
     Input('calcParallel', 'n_clicks'),
     State('currentFrame', 'data'),
     State('plotFrames2', 'figure'),
     State('frames2', 'value'),
     prevent_initial_call=True
 )
-def calcParallel(n_clicks, data, fig, currentFrame):
+def calcProjection(n_clicks, data, fig, currentFrame):
     frame = objects.Frame2D(data[0], data[1])
-    print(frame)
-    N = 3 #number of sequential values
-    DELTA = 10 #hight difference value
-    lim1 = sum(data[1][0:N])/N - DELTA
-    lim2 = sum(data[1][-N:])/N - DELTA
-    # print(lim1, lim2)
-    [first, i] = next([el, i] for i, el in enumerate(data[1][:]) if el < lim1)
-    B = [data[0][i], data[1][i]]
-    print(f'B: {B}')
-    # print(first, data[0][i], i)
-    [last, j] = next([el, i] for i, el in enumerate(data[1][::-1]) if el < lim2)
-    C = [data[0][-j-1], data[1][-j-1]]
-    print(f'C: {C}')
-    A = [data[0][i-1], data[1][i-1]]
-    print(f'A: {A}')
-    D = [data[0][-j], data[1][-j]]
-    print(f'D: {D}')
+    # print(frame)
+    # approximation of a face using a straight line
+    a, b = frame.faceApproximation(data[0], data[1])
+    B = frame.approxB
+    C = frame.approxC
+    # B = frame.B
+    # C = frame.C
+
+    c, d = frame.shadowApproximation(data[0], data[1])
+    A = frame.approxA
+    D = frame.approxD
 
     #change A and D received from scanner to the calculated one
-    A = frame.calcA
-    D = frame.calcD
+    # frame.calcShadow()
+    # A = frame.calcA
+    # D = frame.calcD
 
     errorA = frame.errorA
     errorD = frame.errorD
@@ -201,52 +213,42 @@ def calcParallel(n_clicks, data, fig, currentFrame):
                                 name=f'range1={rangeBCx}, distBC={BC}'))
     rangeADx = A[0] - D[0]
     AD = np.linalg.norm(np.array(A) - np.array(D))
+
+    # finding the point of intersection of lines AB and DC
+    calcO = matrices.linesIntersection(A, B, D, C)
+    O = calcO
+    print(f'calcO: {calcO}')
+
+    errorO = np.linalg.norm(np.array([0, 0]) - np.array(calcO))
+    errorOx = 0 - calcO[0]
+    errorOy = 0 - calcO[1]
+
+    O = calcO
+
     newFig.add_trace(go.Scatter(x=[A[0], D[0]], y=[A[1], D[1]],
                                 mode='markers', marker=dict(size=3, color='red', showscale=False),
-                                name=f'range2={rangeADx}, dist2={AD}'))
-    #approximation of a face using a straight line
-    x = np.array(data[0][i:-j-1])
-    x_np = x.reshape(-1, 1)
-    vector_1 = np.ones((x_np.shape[0], 1))
-    x_np = np.hstack((vector_1, x_np))
-    y = np.array(data[1][i:-j-1])
-    y_np = y.reshape(-1, 1)
+                                name=f'range2={rangeADx}, distAD={AD}'))
 
-    ab_np = matrices.matrix_equation(x_np, y_np)
-    ab_np = np.around(ab_np, 4)
-    a = ab_np[0][0]
-    b = ab_np[1][0]
-    newFig.add_trace(go.Scatter(x=[B[0], C[0]], y=[a+B[0]*b, a+C[0]*b],
-                                mode='lines', line_dash='dash', name=f'{a}+x*{b}'))
-    # TCP = [553126,209910,59905,150,-27,923818]
-    # RU = [557013,236623,54609]
-    # LU = [519210,238346,55042]
-    # dist = math.sqrt((RU[0]/1000-LU[0]/1000)**2 + (RU[1]/1000-LU[1]/1000)**2)
-    # print(dist)
-    newFig.add_trace(go.Scatter(x=[A[0], B[0]], y=[A[1], B[1]],
-                                mode='lines', line_dash='dash', name=f'AB'))
-    newFig.add_trace(go.Scatter(x=[D[0], C[0]], y=[D[1], C[1]],
-                                mode='lines', line_dash='dash', name=f'DC'))
+    newFig.add_trace(go.Scatter(x=[B[0]+10, C[0]-10], y=[a+(B[0]+10)*b, a+(C[0]-10)*b],
+                                mode='lines', line=dict(color='black', width=1), line_dash='dash', name=f'BC: y={a}+x*{b}'))
+    newFig.add_trace(go.Scatter(x=[A[0] + 10, D[0] - 10], y=[c + (A[0] + 10) * d, c + (D[0] - 10) * d],
+                                mode='lines', line=dict(color='black', width=1), line_dash='dash', name=f'AD: y={c}+x*{d}'))
 
-    #finding the point of intersection of lines AB and DC
-    # a1x+b1y=c1; a2x+b2y=c2
-    # x-y=0; -x-y=-1
-    # -kx+y=b
-    # k1, b1 = matrices.line(*A, *B)
-    # k2, b2 = matrices.line(*D, *C)
-    # mM = np.matrix([[-k1, 1], [-k2, 1]])
-    # mC = np.matrix([b1, b2])
-    # mO = mM.I.dot(mC.T)
-    # O = np.asarray(mO).reshape(-1).tolist()
-    O = [0, 0]
-    print(f'O: {O}')
+    newFig.add_trace(go.Scatter(x=[A[0], O[0]], y=[A[1], O[1]],
+                                mode='lines', line=dict(color='red', width=1), line_dash='dash', name=f'ABO'))
+    newFig.add_trace(go.Scatter(x=[D[0], O[0]], y=[D[1], O[1]],
+                                mode='lines', line=dict(color='red', width=1), line_dash='dash', name=f'DCO'))
 
-    kAD = (A[1]-D[1])/(A[0]-D[0])
-    bAD = D[1]-kAD*D[0]
+    #y = k*x + b
+    #y = (yB-yA)/(xB-xA)*x - ((yB-yA)/(xB-xA)*xA-yA)
+    kAD, bAD = matrices.line(*A, *D)
+    # kAD = (A[1]-D[1])/(A[0]-D[0])
+    # bAD = D[1]-kAD*D[0]
     centerLaserAD = [0, bAD]
 
-    kBC = (B[1] - C[1]) / (B[0] - C[0])
-    bBC = C[1] - kBC * C[0]
+    kBC, bBC = matrices.line(*B, *C)
+    # kBC = (B[1] - C[1]) / (B[0] - C[0])
+    # bBC = C[1] - kBC * C[0]
     centerLaserBC = [0, bBC]
 
     OcenterLaserAD = np.linalg.norm(np.array(O) - np.array(centerLaserAD))
@@ -257,118 +259,179 @@ def calcParallel(n_clicks, data, fig, currentFrame):
 
     newFig.add_trace(go.Scatter(x=[O[0], centerLaserAD[0], centerLaserBC[0]], y=[O[1], centerLaserAD[1], centerLaserBC[1]],
                                 mode='markers', marker=dict(size=3, color='red', showscale=False),
-                                name=f'O, centerLaserAD, centerLaserBC'))
+                                name=f'calcO, centerLaserAD, centerLaserBC',
+                                text=['calcO', 'centerLaserAD', 'centerLaserBC']))
+    newFig.add_trace(go.Scatter(x=[O[0], centerLaserAD[0]], y=[O[1], centerLaserAD[1]],
+                                mode='lines', line=dict(color='black', width=1), line_dash='dash',
+                                name=f'OcenterLaserAD'))
     newFig.update_layout({'xaxis': {'scaleanchor': 'y'}})#, showlegend=False)
 
-    #3D lines
+    #3D angles
     h = 39.19
+    # h = 30.0
     AB = np.linalg.norm(np.array(A) - np.array(B))
     AO = np.linalg.norm(np.array(A) - np.array(O))
-    sinAlfa = h/AB
-    print(f'sin Alfa: {sinAlfa}')
-    print(f'AB: {AB}')
-    print(f'AO: {AO}')
-
-    # H = sinAlfa * AO
-    sinGamma = h/np.linalg.norm(np.array(centerLaserBC) - np.array(centerLaserAD))
-    print(f'sinGamma={sinGamma}')
-    H = sinGamma * OcenterLaserAD
-    print(f'H: {H}')
-
+    sinAlfa = h / AB
+    alfaH = sinAlfa * AO
+    alfa = np.arcsin(sinAlfa)
+    print(f'AB, AO, Alfa: {AB, AO, np.degrees(alfa)}')
 
     DC = np.linalg.norm(np.array(D) - np.array(C))
     DO = np.linalg.norm(np.array(D) - np.array(O))
     sinBeta = h / DC
-    H1 = sinBeta * np.linalg.norm(np.array(D) - np.array(O))
-    print(f'sin Beta: {sinBeta}')
-    print(f'DC: {DC}')
-    print(f'DO: {DO}')
-    print(f'H1: {H1}')
+    betaH = sinBeta * DO
+    beta = np.arcsin(sinBeta)
+    print(f'DC, DO, Beta: {DC, DO, np.degrees(beta)}')
 
-    AB = np.linalg.norm(np.array(A) - np.array(B))
-    AB1 = AB * np.cos(np.arcsin(sinAlfa))
-    print(f'AB1: {AB1}')
+    sinGamma = h / np.linalg.norm(np.array(centerLaserBC) - np.array(centerLaserAD))
+    np.linalg.norm(np.array(centerLaserBC) - np.array(centerLaserAD))
+    # print(f'control: {np.linalg.norm(np.array(centerLaserBC) - np.array(centerLaserAD))}')
+    print(f'sinGamma={sinGamma}')
+    gammaH = sinGamma * OcenterLaserAD
+    gamma = np.arcsin(sinGamma)
+    print(f'Gamma: {np.degrees(gamma)}')
+    print(f'alfaH, betaH, gammaH: {alfaH, betaH, gammaH}')
 
-    print(f'BC: {BC}')
+    #calculation projections
+    Op = O.copy()
+    OOp = gammaH
+    print(f'OO1: {OOp}')
+    print(f'geometric deviation of the laser beam from the Z axis UF1: {90 - np.degrees(gamma)} degrees')
 
-    AO = np.linalg.norm(np.array(A) - np.array(O))
-    OO1 = AO * np.sin(np.arcsin(sinAlfa))
-    print(f'OO1: {OO1}')
-    print(f'H/OcenterLaserAD {H}/{OcenterLaserAD}: {H/OcenterLaserAD}')
-    # Gamma = np.arcsin(H/OcenterLaserAD)
-    Gamma = np.arcsin(sinGamma)
-    print(f'Gamma: {Gamma}')
-    print(f'geometric deviation of the laser beam from the Z axis UF1: {90 - np.degrees(Gamma)} degrees')
-    centerLaserAD = np.array([0, OcenterLaserAD*np.cos(Gamma), 0])
-    print(f'new centerLaserAD: {centerLaserAD}')
-    bNewAD = centerLaserAD[1] - kAD * centerLaserAD[0]
+    centerLaserApDpOld = [0, Op[1] + OcenterLaserAD * np.cos(gamma)]
+    print(f'projection of centerLaserAD: {centerLaserApDpOld}')
+    bApDp = centerLaserApDpOld[1]
 
-    centerLaserBC = np.array([0, OcenterLaserBC * np.cos(Gamma), 0])
-    print(f'new centerLaserBC: {centerLaserBC}')
-    bNewBC = centerLaserBC[1] - kBC * centerLaserBC[0]
+    centerLaserBpCp = [0, Op[1] + OcenterLaserBC * np.cos(gamma)]
+    print(f'projection of centerLaserBC: {centerLaserBpCp}')
+    bBpCp = centerLaserBpCp[1]
 
-    A1 = [A[0], kAD * A[0] + bNewAD]
-    D1 = [D[0], kAD * D[0] + bNewAD]
+    Bp = [B[0], kBC * B[0] + bBpCp]
+    Cp = [C[0], kBC * C[0] + bBpCp]
 
-    B1 = [B[0], kBC * B[0] + bNewBC]
-    C1 = [C[0], kBC * C[0] + bNewBC]
+    # Bp = [B[0], B[1] * np.cos(alfa)]
+    # Cp = [C[0], C[1] * np.cos(beta)]
 
-    kA1D1 = (A1[1] - D1[1]) / (A1[0] - D1[0])
-    bA1D1 = D1[1] - kA1D1 * D1[0]
-    centerLaserA1D1 = [0, bA1D1]
-    A1centerLaserA1D1 = np.linalg.norm(np.array(A1) - np.array(centerLaserA1D1))
-    print(f'A1centerLaserA1D1: {A1centerLaserA1D1}')
-    Teta = np.arccos(A1[0]/A1centerLaserA1D1)
-    print(f'Teta: {Teta}')
-    print(f'geometric deviation of the laser beam from the X axis UF1: {np.degrees(Teta)} degrees')
+    # Ap = [A[0], kAD * A[0] + bApDp]
+    # Dp = [D[0], kAD * D[0] + bApDp]
+    # Ap = [A[0], A[1] * np.cos(gamma)]
+    # Dp = [D[0], D[1] * np.cos(gamma)
+    kOBp, bOBp = matrices.line(*O, *Bp)
+    kOCp, bOCp = matrices.line(*O, *Cp)
 
-    newFig.add_trace(go.Scatter(x=[A1[0], D1[0], B1[0], C1[0], centerLaserA1D1[0]],
-                                y=[A1[1], D1[1], B1[1], C1[1], centerLaserA1D1[1]],
+    Ap = [A[0], kOBp * A[0] + bOBp]
+    Dp = [D[0], kOCp * D[0] + bOCp]
+    k, b = matrices.line(*Ap, *Dp)
+    centerLaserApDp = [0, b]
+
+    # kA1D1 = (A1[1] - D1[1]) / (A1[0] - D1[0])
+    # bA1D1 = D1[1] - kA1D1 * D1[0]
+    # centerLaserA1D1 = [0, bA1D1]
+    # kB1C1 = (B1[1] - C1[1]) / (B1[0] - C1[0])
+    # bB1C1 = C1[1] - kB1C1 * C1[0]
+    # centerLaserB1C1 = [0, bB1C1]
+    ApcenterLaserApDp = np.linalg.norm(np.array(Ap) - np.array(centerLaserApDp))
+    print(f'A1centerLaserA1D1: {ApcenterLaserApDp}')
+    teta = np.arccos(Ap[0]/ApcenterLaserApDp)
+    print(f'Teta: {teta}')
+    print(f'geometric deviation of the laser beam from the X axis UF1: {np.degrees(teta)} degrees')
+
+    newFig.add_trace(go.Scatter(x=[Ap[0], Dp[0], Bp[0], Cp[0], centerLaserApDp[0], centerLaserBpCp[0]],
+                                y=[Ap[1], Dp[1], Bp[1], Cp[1], centerLaserApDp[1], centerLaserBpCp[1]],
                                 mode='markers', marker=dict(size=3, color='black', showscale=False),
-                                name=f'A1, D1, B1, C1, centerLaserA1D1'))
+                                name=f'Ap, Dp, Bp, Cp, cLaserApDp, cLaserBpCp',
+                                text=['Ap', 'Dp', 'Bp', 'Cp', 'cLaserApDp', 'cLaserBpCp']))
+    newFig.add_trace(go.Scatter(x=[Bp[0], Cp[0]], y=[Bp[1], Cp[1]],
+                                mode='lines', line=dict(color='black', width=1), line_dash='dash',
+                                name=f'BpCp'))
+    newFig.add_trace(go.Scatter(x=[Ap[0], Dp[0]], y=[Ap[1], Dp[1]],
+                                mode='lines', line=dict(color='black', width=1), line_dash='dash',
+                                name=f'ApDp'))
+    newFig.add_trace(go.Scatter(x=[Ap[0], O[0]], y=[Ap[1], O[1]],
+                                mode='lines', line=dict(color='red', width=1), line_dash='dash',
+                                name=f'OAp'))
+    newFig.add_trace(go.Scatter(x=[Dp[0], O[0]], y=[Dp[1], O[1]],
+                                mode='lines', line=dict(color='red', width=1), line_dash='dash',
+                                name=f'ODp'))
+    newFig.add_trace(go.Scatter(x=[centerLaserApDpOld[0]], y=[centerLaserApDpOld[1]],
+                                mode='markers', marker=dict(size=3, color='red', showscale=False),
+                                name=f'real centerLaserApDp'))
 
 
     # 3D points
-    O1 = np.array([0, 0, 0])
-    O = np.array([0, 0, H])
-    A1.append(0)
-    A1 = np.array(A1)
-    D1.append(0)
-    D1 = np.array(D1)
+    scene = dict(
+        # camera=dict(eye=dict(x=1.15, y=1.15, z=0.8)),
+        camera=dict(eye=dict(x=1.5, y=1.5, z=1.5)),
+        aspectmode='data'
+        # aspectratio=dict(x=1, y=1, z=1)
+    )
+    layout = go.Layout(scene=scene)
+    fig3D = go.Figure(go.Scatter3d(), layout=layout)
 
-    A1O1 = np.linalg.norm(A1 - O1)
-    print(f'A1O1: {A1O1}')
+    Op.append(0)
+    O1 = Op.copy()
+    O1[2] = gammaH
 
-    B1.append(0)
-    B1 = np.array(B1)
-    C1.append(0)
-    C1 = np.array(C1)
+    Ap.append(0)
+    A1 = Ap.copy()
+    Dp.append(0)
+    D1 = Dp.copy()
 
-    B = B1.copy()
-    B[2] = h
-    C = C1.copy()
-    C[2] = h
+    Bp.append(0)
+    B1 = Bp.copy()
+    B1[2] = h
+    Cp.append(0)
+    C1 = Cp.copy()
+    C1[2] = h
 
-    fig3D = go.Figure(go.Scatter3d())
+    centerLaserApDp.append(0)
+    centerLaserA1D1 = centerLaserApDp.copy()
+    centerLaserBpCp.append(0)
+    centerLaserB1C1 = centerLaserBpCp.copy()
+    centerLaserB1C1[2] = h
+
+    npGamma1 = matrices.angle2vectors(centerLaserA1D1, centerLaserB1C1, centerLaserA1D1, centerLaserBpCp)
+    print(f'npGamma1: {np.degrees(npGamma1)}')
+    npGamma2 = matrices.angle2vectors(centerLaserA1D1, O1, centerLaserA1D1, Op)
+    print(f'npGamma2: {np.degrees(npGamma2)}')
+    norm = matrices.angle2vectors(centerLaserBpCp, centerLaserB1C1, centerLaserBpCp, centerLaserApDp)
+    print(f'norm: {np.degrees(norm)}')
+    fig3D.add_trace(go.Scatter3d(x=[centerLaserB1C1[0]],
+                                 y=[centerLaserB1C1[1]],
+                                 z=[centerLaserB1C1[2]],
+                                 name='',
+                                 mode='markers',
+                                 marker=dict(symbol='circle-open', size=3, color='red')
+                                 )
+                    )
+
+
     #main points
-    fig3D.add_trace(go.Scatter3d(x=[O1[0], O[0], centerLaserAD[0], A1[0], D1[0], B1[0], C1[0], B[0], C[0]],
-                                 y=[O1[1], O[1], centerLaserAD[1], A1[1], D1[1], B1[1], C1[1], B[1], C[1]],
-                                 z=[O1[2], O[2], centerLaserAD[2], A1[2], D1[2], B1[2], C1[2], B[2], C[2]],
+    fig3D.add_trace(go.Scatter3d(x=[O1[0], Op[0], centerLaserApDp[0], A1[0], D1[0], B1[0], C1[0], Bp[0], Cp[0]],
+                                 y=[O1[1], Op[1], centerLaserApDp[1], A1[1], D1[1], B1[1], C1[1], Bp[1], Cp[1]],
+                                 z=[O1[2], Op[2], centerLaserApDp[2], A1[2], D1[2], B1[2], C1[2], Bp[2], Cp[2]],
                                  name='main points',
                                  mode='markers',
-                                 text=['O1', 'O', 'centerLaserAD', 'A1', 'D1', 'B1', 'C1', 'B', 'C'],
+                                 text=['O1', 'Op', 'centerLaserAD', 'A1', 'D1', 'B1', 'C1', 'Bp', 'Cp'],
                                  marker=dict(size=2, color='green')
                                  )
                     )
     #vector
-    fig3D.add_trace(go.Scatter3d(x=[O[0], centerLaserAD[0]],
-                                 y=[O[1], centerLaserAD[1]],
-                                 z=[O[2], centerLaserAD[2]],
+    fig3D.add_trace(go.Scatter3d(x=[O1[0], centerLaserA1D1[0]],
+                                 y=[O1[1], centerLaserA1D1[1]],
+                                 z=[O1[2], centerLaserA1D1[2]],
                                  name='Z axis of the laser',
                                  line=dict(color='red', width=3),
                                  marker=dict(symbol='circle-open', size=3, color='red')
                                  )
                     )
+
+    # fig3D.add_trace(go.Cone(x=[centerLaserAD[0]],
+    #                              y=[centerLaserAD[1]],
+    #                              z=[centerLaserAD[2]],
+    #                              u=[0], v=[0], w=[20]
+    #                              )
+    #                 )
 
     # fig3D.add_trace(go.Scatter3d(x=[O[0], centerLaserAD[0]],
     #                              y=[O[1], centerLaserAD[1]],
@@ -379,9 +442,9 @@ def calcParallel(n_clicks, data, fig, currentFrame):
     #                 )
 
     #section
-    fig3D.add_trace(go.Mesh3d(x=[B1[0], C1[0], C[0], B[0]],
-                              y=[B1[1], C1[1], C[1], B[1]],
-                              z=[B1[2], C1[2], C[2], B[2]],
+    fig3D.add_trace(go.Mesh3d(x=[B1[0], C1[0], Cp[0], Bp[0]],
+                              y=[B1[1], C1[1], Cp[1], Bp[1]],
+                              z=[B1[2], C1[2], Cp[2], Bp[2]],
                               i=[0, 0],
                               j=[1, 2],
                               k=[2, 3],
@@ -391,9 +454,9 @@ def calcParallel(n_clicks, data, fig, currentFrame):
                     )
 
     #laser beam
-    fig3D.add_trace(go.Mesh3d(x=[O[0], B[0], C[0], B1[0], C1[0], A1[0], D1[0]],
-                              y=[O[1], B[1], C[1], B1[1], C1[1], A1[1], D1[1]],
-                              z=[O[2], B[2], C[2], B1[2], C1[2], A1[2], D1[2]],
+    fig3D.add_trace(go.Mesh3d(x=[O1[0], Bp[0], Cp[0], B1[0], C1[0], A1[0], D1[0]],
+                              y=[O1[1], Bp[1], Cp[1], B1[1], C1[1], A1[1], D1[1]],
+                              z=[O1[2], Bp[2], Cp[2], B1[2], C1[2], A1[2], D1[2]],
                               i=[0],
                               j=[5],
                               k=[6],
@@ -402,47 +465,108 @@ def calcParallel(n_clicks, data, fig, currentFrame):
                               name='laser beam'
                               )
                     )
-    # fig3D.add_trace(go.Scatter3d(x=[A[0], D[0], B[0], C[0], O[0]],
-    #                              y=[A[1], D[1], B[1], C[1], O[1]],
-    #                              z=[0, 0, h, h, H],
-    #                              mode='markers',
-    #                              marker=dict(size=3, color='green')
-    #                              )
-    #                 )
-    # fig3D.update_traces(text=['A', 'D', 'B', 'C', 'O'], selector=dict(type='scatter3d'))
 
-    # fig3D.add_trace(go.Scatter3d(x=[B[0], C[0], C[0], B[0], B[0]],
-    #                              y=[B[1], C[1], C[1], B[1], B[1]],
-    #                              z=[h, h, 0, 0, h],
-    #                              mode='lines',
-    #                              line=dict(width=3)
-    #                              )
-    #                 )
-
-    # fig3D.add_trace(go.Scatter3d(x=[A[0], O[0], D[0], A[0]],
-    #                              y=[A[1], O[1], D[1], A[1]],
-    #                              z=[0, H, 0, 0],
-    #                              mode='lines',
-    #                              line=dict(width=1)
-    #                              )
-    #                 )
-
-    # fig3D.update_layout(scene_camera=dict(eye=dict(x=0., y=0., z=2.5),
-    #                                       up=dict(x=0., y=0., z=1),
-    #                                       center=dict(x=0., y=0., z=0.)))
-    # fig3D.update_layout(width=700, height=700, scene_camera_eye_z=0.8)
 
     new_row = {"frame": currentFrame[-1].split('\\')[-1],
                "UF1 Ry": data[4][4]/10000,
-               "Teta: Z axis UF1": np.degrees(Teta),
-               "Gamma: X axis UF1": 90 - np.degrees(Gamma),
+               "UF1 Rz": data[4][5] / 10000,
+               "Teta(Z and UF1)": np.degrees(teta),
+               "Gamma(X and UF1)": 90 - np.degrees(gamma),
                "h calculated": np.abs((hCalc2+hCalc1)/2),
                "top edge": BC,
-               "errorA": errorA,
-               "errorD": errorD
+               "errO": errorO,
+               "errOx": errorOx,
+               "errOy": errorOy,
+               "errA": errorA,
+               "errD": errorD
                }
     df.loc[len(df)] = new_row
     rowData = df.to_dict("records")
 
-    return f'dX: {np.degrees(Teta)}, dZ: {90 - np.degrees(Gamma)}', newFig, fig3D, rowData
+    return f'dX: {round(np.degrees(teta), 4)}, dZ: {round(90 - np.degrees(gamma), 4)}', newFig, fig3D, rowData
 
+#Restore surface
+@callback(
+    Output('fig3D', 'figure', allow_duplicate=True),
+    Input('restSurf', 'n_clicks'),
+    State('loadPaths2', 'value'),
+    prevent_initial_call=True
+)
+def restSurf(n_clicks, path):
+    j=0
+    # 3D points
+    scene = dict(
+        camera=dict(eye=dict(x=1.15, y=1.15, z=0.8)),
+        aspectmode='data'
+        # aspectratio=dict(x=1, y=1, z=1)
+    )
+    layout = go.Layout(scene=scene)
+    fig3D = go.Figure(go.Scatter3d(), layout=layout)
+    print(f'Current path: {path}')
+    frames = [f.path for f in os.scandir(path) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
+    X = np.array([0]*944)
+    Y = np.array([0]*944)
+    Z = np.array([0]*944)
+    for i, line in enumerate(frames):
+        arr = []
+        with open(line, 'r') as file:
+            for line2 in file:
+                arr.append([float(x) for x in line2.split()])
+        fname = line.split('\\')[-1]
+        # print(len(arr[0]))
+        X = np.vstack([X, np.array(arr[0])])
+        # print(f'X shape: {X.shape}')
+        Y = np.vstack([Y, np.full(len(arr[0]),arr[4][0]/1000-450)])
+        # print(f'Y shape: {Y.shape}')
+        Z = np.vstack([Z, np.array(np.full(len(arr[0]), arr[1]))])
+        # print(f'Z shape: {Z.shape}')
+
+    fig3D.add_trace(go.Surface(x=X, y=Y, z=Z))
+
+    return fig3D
+
+#Calculate coordinates
+@callback(
+    Output('coordinates', 'children'),
+    Input('calcCoord', 'n_clicks'),
+    State('loadPaths2', 'value'),
+    prevent_initial_call=True
+)
+def calcCoord(n_clicks, path):
+    centersHole = []
+    print(f'Current path: {path}')
+    frames = [f.path for f in os.scandir(path) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
+    for i, line in enumerate(frames):
+        arr = []
+        with open(line, 'r') as file:
+            for line2 in file:
+                arr.append([float(x) for x in line2.split()])
+        fname = line.split('\\')[-1]
+        # print(arr)
+        print(f'Calculation for frame: {fname}')
+        surf = np.array(arr[0])
+        # print(surf.nonzero())
+        # print(surf.shape)
+        startHoles = []
+        [startHoles.append([el, i]) for i, el in enumerate(surf[:-1]) if (el - surf[i + 1]) > 1]
+        print(startHoles)
+        endHoles = []
+        # endHoles.append([surf[el[1]+1], el[1]+1])
+        endHoles = [[surf[el[1]+1], el[1]+1] for el in startHoles]
+        print(endHoles)
+        centersHole.append([(startHoles[0][0]-endHoles[0][0])/2+endHoles[0][0], -(startHoles[1][0]-endHoles[1][0])/2+startHoles[1][0]])
+
+        # res = next(([el, i] for i, el in enumerate(surf[:]) if (el-surf[i+1])>1), -1)
+        # if res==-1:
+        #     print('nothing')
+        # else:
+        #     print('ok')
+        #     print(res)
+        # res = next(([el, i] for i, el in enumerate(surf[:]) if (el - surf[i + 1]) > 1), -1)
+        # if res == -1:
+        #     print('nothing')
+        # else:
+        #     print('ok')
+        #     print(res)
+    print(f'final result: {centersHole}')
+    return (0, 0)

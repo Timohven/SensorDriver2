@@ -9,7 +9,7 @@ PATH = os.getcwd()
 DICTSUBFOLDERS = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_dir()]
 DICTSUBFOLDERS.append(dict({'label': PATH, 'value': PATH}))
 DICTSUBFOLDERS.append(dict({'label': 'local paths are only available', 'value': 'local', 'disabled': True}))
-CURTXT = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(PATH) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
+CURTXT = [dict({'label': f.path.split('\\')[-1], 'value': f.path}) for f in os.scandir(PATH) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
 
 # print(CURCSV)
 # print('end')
@@ -59,7 +59,7 @@ Output('plotFrames', 'figure'),
 def pathSelection(path):
     fig = go.Figure()
     print(path)
-    curtxt = [dict({'label': f.path, 'value': f.path}) for f in os.scandir(path) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
+    curtxt = [dict({'label': f.path.split('\\')[-1], 'value': f.path}) for f in os.scandir(path) if f.is_file() and f.path.split('.')[-1].lower() == 'txt']
     if curtxt:
         # print('there are csvs')
         curtxt.insert(0, dict({'label': 'add all', 'value': 'addall'}))

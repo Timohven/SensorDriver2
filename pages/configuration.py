@@ -13,7 +13,7 @@ UDP_IP = "192.168.254.7"
 UDP_PORT = 12000 #port for get status of IO-01 request
 UDP_PORT2 = 11000 #port for get current coordinate request
 MESSAGE = b"123,1,10010,1,0,123" #get status of IO-01 request
-MESSAGE2 = b"123,2,1,12" #get current coordinate request
+MESSAGE2 = b"123,2,10,12" #get current coordinate request
 SOCKET = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 numberOfFrame = 0
 INTERVAL_ROBOT = 100
@@ -285,7 +285,7 @@ def syncRobot(n_clicks, n_intervals):
 )
 def updateIntervalsRobot(n_intervals, value, arrX, arrZ, intensity, width):
     global numberOfFrame, MESSAGE, UDP_IP, UDP_PORT
-    currentTime = dt.datetime.now().strftime('%Hh_%Mm_%Ss')
+    currentTime = dt.datetime.now().strftime('%dd_%mm_%yy__%Hh_%Mm_%Ss')
     if value == PATH.split('\\')[-1]: value = './'
 
     SOCKET = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
