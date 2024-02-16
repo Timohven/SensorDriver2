@@ -29,6 +29,8 @@ class Frame2D:
         self.approxA = [0.0, 0.0]
         self.approxD = [0.0, 0.0]
 
+        self.calcCenterBC = [0.0, 0.0]
+
     def __str__(self):
         return f'A: {self.A}, B: {self.B}, C: {self.C}, D: {self.D}, errorA: {self.errorA}, errorD: {self.errorD}, '
 
@@ -97,5 +99,6 @@ class Frame2D:
         a, b = matrices.linearApproximation(x, y)
         self.approxB = [X[self.indexB], a + X[self.indexB]*b]
         self.approxC = [X[self.indexC], a + X[self.indexC]*b]
-
+        self.calcCenterBC = [self.approxB[0]-(self.approxB[0] - self.approxC[0])/2, self.approxB[1]-(self.approxB[1] - self.approxC[1])/2]
+        print(f'CENTER BC:  {self.calcCenterBC}')
         return a, b

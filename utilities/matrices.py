@@ -66,3 +66,19 @@ def angle2vectors(A, B, C, D):
     print(f'{a, normA, b, normB}')
     angle = np.arccos(a.dot(b)/(normA*normB))
     return angle
+
+def calcOffsetTF2New(h):
+    #z,x,Ry from ToolFrame1 in mm and degree
+    deltaHTCP = 7.545 #difference between 0 of UF1 and TCP(TF1)
+    h += deltaHTCP
+    a = 446.544
+    b = 20.127
+    RyDegree = -48.5
+    Ry = np.deg2rad(np.abs(RyDegree))
+    l2 = h - b / np.sin(Ry)
+    a2 = l2 * np.cos(Ry)
+    a0 = b / np.tan(Ry)
+    a1 = a + a0 + a2
+    b1 = l2 * np.sin(Ry)
+
+    return a1, b1

@@ -26,6 +26,7 @@ df = pd.DataFrame(data, columns=['frame',
                                  'Gamma(X and UF1)',
                                  'h calculated',
                                  'top edge',
+                                 'dCenterBC',
                                  'errO',
                                  'errOx',
                                  'errOy',
@@ -198,6 +199,8 @@ def calcProjection(n_clicks, data, fig, currentFrame):
     # frame.calcShadow()
     # A = frame.calcA
     # D = frame.calcD
+
+    centerBC = frame.calcCenterBC
 
     errorA = frame.errorA
     errorD = frame.errorD
@@ -474,6 +477,7 @@ def calcProjection(n_clicks, data, fig, currentFrame):
                "Gamma(X and UF1)": 90 - np.degrees(gamma),
                "h calculated": np.abs((hCalc2+hCalc1)/2),
                "top edge": BC,
+               'dCenterBC': np.linalg.norm(np.array(centerBC) - np.array(centerLaserBC)),
                "errO": errorO,
                "errOx": errorOx,
                "errOy": errorOy,
